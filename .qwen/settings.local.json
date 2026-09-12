@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --no-install playwright install chromium)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(npm --prefix /app/playwright-scratch install --no-audit --no-fund -D playwright@1.54 @playwright/test@1.54)",
+      "Bash(npx --prefix /app/playwright-scratch --no-install playwright --version)",
+      "Bash(npm --version)",
+      "Bash(npm ls *)",
+      "Bash(npx playwright *)",
+      "Bash(node -e \"const pw = require\\('playwright'\\); console.log\\('playwright version:', require\\('playwright/package.json'\\).version\\)\")",
+      "Read(//home/ubuntu/.cache/**)",
+      "Bash(node -e \"console.log\\(process.version\\)\")",
+      "Bash(npm root *)",
+      "Bash(/root/.cache/ms-playwright/chromium-1234/chrome-linux/chrome --version)",
+      "Bash(NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules node pw-test.js)",
+      "Bash(PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules node pw-test.js)",
+      "Bash(PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules node -e ' *)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules node *)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright /root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright --version)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright /root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright screenshot \"data:text/html,<h1>CLI test</h1>\" /tmp/pw-cli-test.png)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright /root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright test --version)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright /root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright test)",
+      "Bash(HOME=/root NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules node -e \"const t = require\\('playwright/test'\\); console.log\\('playwright/test OK:', typeof t.test, typeof t.expect\\)\")",
+      "Bash(sed -i \"s|require\\('@playwright/test'\\)|require\\('playwright/test'\\)|\" example.spec.js)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules /root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright test)",
+      "Bash(export HOME=/root \\\\ *)",
+      "Bash(node -e \"require\\('playwright'\\); console.log\\('require OK'\\)\")",
+      "Bash(/root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright --version)",
+      "Bash(HOME=/root PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright NODE_PATH=/root/.npm/_npx/e41f203b7505f1fb/node_modules /root/.npm/_npx/e41f203b7505f1fb/node_modules/.bin/playwright test --reporter=line)",
+      "Bash(echo \"---exit: $?\")",
+      "Skill(playwright)"
+    ]
+  }
+}
