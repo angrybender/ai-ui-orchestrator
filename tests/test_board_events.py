@@ -45,6 +45,10 @@ def test_stream_observes_claim_finish_and_reconnect(tmp_path, monkeypatch, error
         task = payload(await anext(stream))[0]
         assert task["status"] == ("WAIT" if error else "REVIEW")
         assert task["is_error"] is bool(error)
+        if error:
+            chat = board_store.get_chat(run["task_id"])
+            assert chat["messages"][-1]["role"] == "agent"
+            assert chat["messages"][-1]["text"] == error
         await stream.aclose()
         stream = board_events.task_events(request)
         assert payload(await anext(stream))[0] == task

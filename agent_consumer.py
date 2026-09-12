@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -59,6 +60,11 @@ def consume(stop: threading.Event, interval: float) -> int:
                     break
             if process.poll() not in (None, 0):
                 logger.warning('Agent worker failed; the queue will be checked again.')
+                try:
+                    import agent_store
+                    agent_store.recover()
+                except (OSError, RuntimeError, sqlite3.OperationalError):
+                    logger.error('Unable to recover failed agent worker state.')
         except OSError:
             logger.error('Unable to create agent worker process.')
         finally:

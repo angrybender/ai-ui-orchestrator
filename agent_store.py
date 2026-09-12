@@ -68,9 +68,18 @@ def finish(run_id: str, error: str | None = None, stop_reason: str | None = None
             ('FAILED' if error else 'SUCCEEDED', time.time(), error, stop_reason, run_id),
         )
         connection.execute(
-            "UPDATE board_tasks SET status = ?, is_error = ? WHERE id = ? AND status = 'IN PROGRESS'",
+            'UPDATE board_tasks SET status = ?, is_error = ? WHERE id = ? AND status = \'IN PROGRESS\'',
             ('WAIT' if error else 'REVIEW', bool(error), row['task_pk']),
         )
+        if error and row['task_pk'] is not None:
+            updated_at = "strftime('%Y-%m-%d %H:%M', 'now', 'localtime')"
+            connection.execute(
+                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, 'agent', ?, ?, {updated_at}) "
+                "ON CONFLICT(task_pk, run_id, role) DO UPDATE SET "
+                "text = task_chat_messages.text || char(10) || char(10) || excluded.text, "
+                "updated_at = excluded.updated_at",
+                (row['task_pk'], error, run_id),
+            )
 
 
 def recover() -> None:
@@ -152,7 +161,7 @@ def claim(timeout: float) -> dict | None:
             (task['id'],),
         ).fetchone()
         previous = connection.execute(
-            "SELECT session_id FROM agent_runs WHERE task_pk = ? AND state = 'SUCCEEDED' AND session_id IS NOT NULL ORDER BY finished_at DESC LIMIT 1",
+            "SELECT session_id FROM agent_runs WHERE task_pk = ? AND session_id IS NOT NULL AND session_id != '' ORDER BY created_at DESC LIMIT 1",
             (task['id'],),
         ).fetchone()
         return {'id': run_id, 'task_id': task['task_id'], 'comment': comment['text'] if comment else None,

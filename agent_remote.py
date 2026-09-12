@@ -12,6 +12,7 @@ import stat
 import threading
 import time
 import unicodedata
+import os
 from typing import Callable
 
 import paramiko
@@ -20,6 +21,19 @@ PROMPT = ("Выполни задачу из TASK.md. Все необходимы
           "рабочем каталоге. Работай только в текущем каталоге.")
 CONNECT_TIMEOUT = 20
 STDERR_JOIN_TIMEOUT = 0.2
+
+
+def _open_raw_log(task_id: str):
+    path = Path(__file__).resolve().parent / "data" / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    prefix = "test-" if os.environ.get("PYTEST_CURRENT_TEST") else ""
+    return (path / f"{prefix}{time.strftime('%Y%m%d-%H%M%S')}-{task_id}-{threading.get_ident()}.log").open("ab")
+
+
+def _raw_log(handle, direction: bytes, payload: bytes) -> None:
+    if handle is not None:
+        handle.write(direction + payload)
+        handle.flush()
 
 
 class RemoteAgentError(RuntimeError):
@@ -157,7 +171,9 @@ class _Diagnostics:
             return "\n".join(self.safe("".join(parts)) for parts in self.parts.values() if parts)
 
 
-def _event(message, diagnostics, on_message=None):
+def _event(message, diagnostics, on_message=None, raw_log=None):
+    if raw_log is not None:
+        _raw_log(raw_log, b"IN ", json.dumps(message, ensure_ascii=False).encode("utf-8") + b"\n")
     params = message.get("params")
     if not isinstance(params, dict) or not isinstance(params.get("update"), dict):
         raise ValueError
@@ -202,23 +218,36 @@ def _unique_object(pairs):
     return result
 
 
-def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, on_message=None):
+def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, on_message=None, raw_log=None):
     def send(message):
         if cancelled.is_set():
             raise ValueError
-        stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+        payload = json.dumps(message, ensure_ascii=False).encode("utf-8") + b"\n"
+        _raw_log(raw_log, b"OUT ", payload)
+        stdin.write(payload)
         stdin.flush()
 
     send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
     while not cancelled.is_set():
         line = stdout.readline()
+        _raw_log(raw_log, b"IN ", line)
         if not line or not line.endswith(b"\n"):
             raise ValueError
         message = json.loads(line.decode("utf-8"), parse_constant=_reject_constant, object_pairs_hook=_unique_object)
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
             raise ValueError
+        if "error" in message:
+            error = message.get("error")
+            if isinstance(error, dict):
+                message_text = error.get("message")
+                data = error.get("data")
+                details = data.get("details") if isinstance(data, dict) else None
+                parts = [value.strip() for value in (message_text, details)
+                         if isinstance(value, str) and value.strip()]
+                raise ACPError(f"{method}: {': '.join(parts)}" if parts else f"{method}: ACP request failed")
+            raise ValueError
         if "method" in message:
-            if not isinstance(message["method"], str) or "result" in message or "error" in message:
+            if not isinstance(message["method"], str) or "result" in message:
                 raise ValueError
             if "id" in message:
                 if type(message["id"]) not in (int, str):
@@ -226,14 +255,18 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
                 send({"jsonrpc": "2.0", "id": message["id"],
                       "error": {"code": -32601, "message": "Method not supported"}})
             elif message["method"] == "session/update":
-                _event(message, diagnostics, on_message)
+                _event(message, diagnostics, on_message, raw_log)
             continue
         if type(message.get("id")) is not int or message["id"] != request_id:
             raise ValueError
         if "error" in message:
             error = message.get("error")
             if isinstance(error, dict) and isinstance(error.get("message"), str):
-                raise ACPError(error["message"])
+                details = error.get("data", {}).get("details") if isinstance(error.get("data"), dict) else None
+                text = error["message"]
+                if isinstance(details, str) and details.strip():
+                    text = f"{text}: {details}"
+                raise ACPError(text)
             raise ValueError
         if not isinstance(message.get("result"), dict):
             raise ValueError
@@ -258,9 +291,13 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
     worker and must be short, thread-safe operations. Logs are delivered once on
     completion (also on failure), never as unredacted streaming chunks.
     """
+    raw_log = None
     try:
+        raw_log = _open_raw_log(task.get("task_id", "unknown"))
         prepared = _prepare(task, attachments, config)
     except Exception:
+        if raw_log is not None:
+            raw_log.close()
         raise RemoteAgentError("Invalid remote agent configuration or task context.") from None
     host, port, username, auth, base, cwd, shell, timeout, names, text, secrets = prepared
     diagnostics = _Diagnostics(secrets)
@@ -320,6 +357,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     if not chunk:
                         break
                     diagnostics.append("stderr", decoder.decode(chunk))
+                    _raw_log(raw_log, b"ERR ", chunk)
             except Exception:
                 pass
             finally:
@@ -339,17 +377,17 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 streams.extend((stdin, stdout))
                 initialized = _request(stdin, stdout, 1, "initialize", {
                     "protocolVersion": 1, "clientCapabilities": {},
-                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message)
+                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message, raw_log)
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
                 if task.get("comment"):
                     session_id = task.get("session_id")
                     if not isinstance(session_id, str) or not session_id.strip():
-                        raise ValueError
+                        raise ACPError("session/load: missing saved session id")
                     session = _request(stdin, stdout, 2, "session/load", {
-                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message)
+                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log)
                 else:
-                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message)
+                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log)
                     session_id = session.get("sessionId")
                     if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
                         raise ValueError
@@ -357,7 +395,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     return
                 on_session(session_id)
                 result = _request(stdin, stdout, 3, "session/prompt", {
-                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message)
+                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message, raw_log)
                 reason = result.get("stopReason")
                 if reason not in ("end_turn", "max_tokens", "max_turn_requests", "refusal"):
                     if reason in ("cancelled", "canceled", "error", "failed"):
@@ -368,6 +406,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 outcome.update(sessionId=session_id, stopReason=reason)
             except ACPError as exception:
                 outcome["error"] = diagnostics.safe(str(exception))
+                diagnostics.append("acp", "\n" + str(exception))
                 outcome["failed"] = True
             except Exception:
                 outcome["failed"] = True
@@ -381,20 +420,26 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             error = "Remote agent timed out."
         elif outcome.get("failed") or not outcome:
             error = diagnostics.safe(outcome.get("error") or "Remote agent execution failed.")
-    except Exception:
-        error = "Remote agent preparation or execution failed."
+    except Exception as exception:
+        detail = diagnostics.safe(str(exception)).strip()
+        error = detail or f"Remote agent connection failed ({type(exception).__name__})."
+        diagnostics.append("stderr", f"{type(exception).__name__}: {error}")
     finally:
         cancelled.set()
         _close(channel)
+        if stderr_thread is not None:
+            stderr_thread.join(STDERR_JOIN_TIMEOUT)
         _close(ssh)
         _close(sftp)
         if worker is not None and worker.is_alive():
             worker.join(STDERR_JOIN_TIMEOUT)
-        if stderr_thread is not None:
-            stderr_thread.join(STDERR_JOIN_TIMEOUT)
         for stream in streams:
             _close(stream)
+        if raw_log is not None:
+            raw_log.close()
         safe_log = diagnostics.finish()
+        if error == "Remote agent execution failed." and safe_log:
+            error = f"Remote agent execution failed: {safe_log}"
         if safe_log:
             try:
                 on_log(safe_log)

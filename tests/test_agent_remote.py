@@ -255,7 +255,7 @@ def test_strict_acp_failures(setup, bad):
     ssh.channel.messages = [update("available diagnostic"), bad]
     with pytest.raises(remote.RemoteAgentError) as error:
         run()
-    assert str(error.value) == "Remote agent execution failed."
+    assert str(error.value) == "Remote agent execution failed: available diagnostic"
     assert logs == ["available diagnostic"]
     assert ssh.channel.closed.is_set()
 
@@ -368,3 +368,38 @@ def test_attachment_upload_failure_does_not_start(setup, tmp_path, monkeypatch):
         run([(local, "file.txt")])
     assert ssh.channel.command is None
     assert "/tasks/PRJ-12/TASK.md" in ssh.sftp.files
+
+
+@pytest.mark.parametrize("stderr", [b"", b"Internal error: Connection error.\n"])
+def test_worker_persists_acp_error_in_log_status_and_chat(setup, monkeypatch, stderr):
+    import agent_store
+    import agent_worker
+    import board_store
+
+    ssh, config, task, _, _, _ = setup
+    raw = Buffer()
+    monkeypatch.setattr(remote, "_open_raw_log", lambda _: raw)
+    monkeypatch.setattr(agent_worker.Config, "get", staticmethod(config.get))
+    board_store.init_database()
+    agent_store.init_database()
+    board_store.create_task(task["task_id"], task["title"], task["description"], [])
+    board_store.move_task(task["task_id"], "OPEN", 0)
+    ssh.channel.messages[2:] = [update("Agent completed context"), {
+        "jsonrpc": "2.0", "id": 3, "error": {
+            "code": -32603, "message": "Internal error",
+            "data": {"details": "Connection error."}}}]
+    ssh.channel.stderr_chunks = [stderr] if stderr else []
+    assert agent_worker.execute() == 1
+    with board_store.connect() as connection:
+        run = dict(connection.execute("SELECT * FROM agent_runs").fetchone())
+    assert run["state"] == "FAILED"
+    assert "Connection error." in run["error"]
+    assert "Connection error." in run["log"]
+    chat = board_store.get_chat(task["task_id"])
+    assert chat["status"] == "WAIT"
+    assert board_store.get_task(task["task_id"])["is_error"] is True
+    assert "Agent completed context" in chat["messages"][0]["text"]
+    assert "Connection error." in chat["messages"][0]["text"]
+    assert b'"details": "Connection error."' in raw.getvalue()
+    if stderr:
+        assert b"ERR " + stderr in raw.getvalue()

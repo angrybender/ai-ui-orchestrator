@@ -58,7 +58,14 @@
         node.className = `chat-message ${message.role === "user" ? "chat-user" : "chat-agent"}`;
         const body = document.createElement("div");
         body.className = "chat-message-body";
-        body.innerHTML = window.marked?.parse(message.text || "", { breaks: true }) || "";
+        const markdown = window.marked?.parse || window.marked?.marked;
+        const rendered = typeof markdown === "function" ? markdown(message.text || "", { breaks: true }) : null;
+        if (rendered === null) {
+          body.textContent = message.text || "";
+          window.showToast("Markdown renderer unavailable", { type: "error" });
+        } else {
+          body.innerHTML = rendered;
+        }
         const actions = document.createElement("div");
         actions.className = "chat-message-actions";
         const copy = document.createElement("button");
