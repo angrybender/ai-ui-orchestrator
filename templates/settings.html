@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Settings · Orchestrator{% endblock %}
+{% block content %}
+<nav class="settings-tabs" aria-label="Configuration sections">
+  {% for section in sections %}
+  <a class="settings-tab {% if section.key == selected.key %}is-active{% endif %}" href="/settings?section={{ section.key }}">{{ section.title }}</a>
+  {% endfor %}
+</nav>
+<form id="settings-form" class="settings-form" data-section="{{ selected.key }}">
+  {% for group in selected.groups %}
+  <section class="field-group" aria-labelledby="group-title-{{ loop.index }}">
+    <h2 id="group-title-{{ loop.index }}" class="field-group-title">{{ group.title }}</h2>
+    <div class="group-fields">
+      {% for field in group.fields %}
+      <div class="field-control">
+        {% if field.type == 'checkbox' %}
+        <label class="checkbox" for="{{ field.id }}">
+          <input id="{{ field.id }}" name="{{ field.id }}" type="checkbox" {% if values[field.id] %}checked{% endif %}>
+          <span class="checkmark"></span>
+          <span>{{ field.title or 'Enabled' }}</span>
+        </label>
+        {% elif field.type == 'text' %}
+        <textarea id="{{ field.id }}" name="{{ field.id }}" class="{{ 'input-big' if field.sub_type == 'big' else '' }}" placeholder="{{ field.title or field.id|replace('_', ' ')|title }}" {% if field.required %}required{% endif %}>{{ values[field.id] }}</textarea>
+        {% else %}
+        <input id="{{ field.id }}" name="{{ field.id }}" type="{{ 'number' if field.type == 'integer' else field.type }}" {% if field.type == 'integer' %}min="{{ 1 if field.required else 0 }}" step="1"{% endif %} class="{{ 'input-big' if field.sub_type == 'big' else '' }}" value="{{ values[field.id] }}" placeholder="{{ field.title or field.id|replace('_', ' ')|title }}" {% if field.required %}required{% endif %}>
+        {% endif %}
+        {% if field.required and field.type != 'checkbox' %}<span class="required-mark" aria-label="Required">*</span>{% endif %}
+        {% if field.description %}<p class="field-description">{{ field.description }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  <div class="form-actions">
+    <button class="button primary" type="submit">Save</button>
+  </div>
+</form>
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ url_for('static', path='js/settings.js') }}"></script>
+{% endblock %}

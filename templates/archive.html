@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Archive · Orchestrator{% endblock %}
+{% block content %}
+<section class="archive-page" id="archive" aria-label="Archived tasks">
+  <div class="archive-list" id="archive-list" aria-live="polite"></div>
+  <nav class="pagination" id="archive-pagination" aria-label="Archive pages"></nav>
+</section>
+{% endblock %}
+{% block page_scripts %}<link rel="stylesheet" href="{{ url_for('static', path='css/archive.css') }}"><script src="{{ url_for('static', path='js/archive.js') }}"></script>{% endblock %}

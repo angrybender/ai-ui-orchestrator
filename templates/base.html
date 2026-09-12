@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AI UI Orchestrator{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/toast.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/spinner.css') }}">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <a class="brand" href="/" aria-label="AI UI Orchestrator home">
+        <span class="brand-mark">✦</span>
+        <span>Orchestrator</span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a class="nav-link {% if active == 'board' %}is-active{% endif %}" href="/">Board</a>
+        <a class="nav-link {% if active == 'archive' %}is-active{% endif %}" href="/archive">Archive</a>
+        <a class="nav-link {% if active == 'settings' %}is-active{% endif %}" href="/settings">Settings</a>
+        <a class="nav-link" href="#">Background tasks</a>
+      </nav>
+      <div class="system-status"><span></span>Operational</div>
+    </div>
+  </header>
+  <main class="main-content">{% block content %}{% endblock %}</main>
+  <script src="{{ url_for('static', path='js/toast.js') }}"></script>
+  <script src="{{ url_for('static', path='js/spinner.js') }}"></script>
+  {% block page_scripts %}{% endblock %}
+</body>
+</html>

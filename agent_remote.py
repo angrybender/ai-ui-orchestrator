@@ -1,0 +1,405 @@
+"""SSH/SFTP ACP transport; persistence and process ownership belong to the caller."""
+from __future__ import annotations
+
+import io
+import json
+import math
+from pathlib import Path
+import posixpath
+import re
+import shlex
+import stat
+import threading
+import time
+import unicodedata
+from typing import Callable
+
+import paramiko
+
+PROMPT = ("Выполни задачу из TASK.md. Все необходимые вложения находятся в текущем "
+          "рабочем каталоге. Работай только в текущем каталоге.")
+CONNECT_TIMEOUT = 20
+STDERR_JOIN_TIMEOUT = 0.2
+
+
+class RemoteAgentError(RuntimeError):
+    """Only fixed, safe messages cross the transport boundary."""
+
+    def __init__(self, message: str, stop_reason: str | None = None):
+        super().__init__(message)
+        self.stop_reason = stop_reason
+
+
+class ACPError(RuntimeError):
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
+def _name(value: str) -> bool:
+    return (isinstance(value, str) and bool(value.strip()) and value not in (".", "..")
+            and not any(c in "/\\" or unicodedata.category(c).startswith("C") for c in value))
+
+
+def _prepare(task, attachments, config):
+    task_id = task.get("task_id")
+    if not _name(task_id):
+        raise ValueError
+    if any(not isinstance(task.get(k), str) for k in ("title", "description")):
+        raise ValueError
+    host = config.get("remote_server.host")
+    username = config.get("remote_server.username")
+    shell = config.get("agent.shell")
+    base = config.get("tasks.base_dir")
+    password = config.get("remote_server.password") or ""
+    key = config.get("remote_server.ssh_key") or ""
+    if not all(isinstance(v, str) for v in (host, username, shell, base, password, key)):
+        raise ValueError
+    if not host.strip() or not username.strip() or not shell.strip():
+        raise ValueError
+    if any(unicodedata.category(c).startswith("C") for c in host + username + base) or "\x00" in shell:
+        raise ValueError
+    if not base.startswith("/") or "\\" in base or not (password or key):
+        raise ValueError
+    # Bracketed IPv6 may carry a port; bare IPv6 uses the default port.
+    port = 22
+    if host.startswith("["):
+        match = re.fullmatch(r"\[([^\[\]]+)\](?::([0-9]+))?", host)
+        if not match:
+            raise ValueError
+        host, number = match.groups()
+        port = int(number) if number else 22
+    elif host.count(":") == 1:
+        host, number = host.rsplit(":", 1)
+        port = int(number)
+    if not host or any(c.isspace() for c in host) or not 1 <= port <= 65535:
+        raise ValueError
+    timeout_value = config.get("agent.agent_timeout")
+    if isinstance(timeout_value, bool):
+        raise ValueError
+    timeout = float(timeout_value)
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError
+    key_text = ""
+    if key:
+        path = Path(key)
+        if not path.is_absolute() or not path.is_file():
+            raise ValueError
+        key_text = path.read_text(encoding="utf-8")
+    names, used = [], {"task.md"}
+    for local, original in attachments:
+        if not isinstance(original, str):
+            raise ValueError
+        name = original.replace("\\", "/").rsplit("/", 1)[-1]
+        if not _name(name) or name.casefold() == "task.md" or not Path(local).is_file():
+            raise ValueError
+        stem, ext = posixpath.splitext(name)
+        candidate, n = name, 2
+        while candidate.casefold() in used:
+            candidate = f"{stem}-{n}{ext}"
+            n += 1
+        used.add(candidate.casefold())
+        names.append((Path(local), candidate))
+    base = posixpath.normpath("/" + base.lstrip("/"))
+    cwd = posixpath.normpath(posixpath.join(base, task_id))
+    if posixpath.dirname(cwd) != base or cwd == base:
+        raise ValueError
+    listing = "\n".join(f"- {name}" for _, name in names) or "Нет вложений."
+    text = f"# {task_id} — {task['title']}\n\n{task['description']}\n\n## Вложения\n\n{listing}\n"
+    system_prompt = config.get("agent.prompt")
+    if system_prompt:
+        text = f"{system_prompt}\n\n{text}"
+    auth = {"key_filename": key} if key else {"password": password}
+    return host, port, username, auth, base, cwd, shell, timeout, names, text, (password, key, key_text)
+
+
+class _Diagnostics:
+    """Do not deliver chunks: a secret may span any number of ACP/stderr frames."""
+
+    def __init__(self, secrets):
+        self.lock = threading.Lock()
+        self.parts = {"acp": [], "stderr": []}
+        self.message_parts = []
+        self.sealed = False
+        self.secrets = {s for s in secrets if s}
+        for secret in tuple(self.secrets):
+            if "PRIVATE KEY" in secret:
+                lines = [s.strip() for s in secret.splitlines() if s.strip() and "---" not in s]
+                self.secrets.update(lines)
+                self.secrets.add("".join(lines))
+
+    def safe(self, text):
+        # Include unterminated PEM blocks and a truncated opening marker.
+        text = re.sub(r"-----BEGIN [^\r\n]*PRIVATE KEY-----.*?(?:-----END [^\r\n]*PRIVATE KEY-----|\Z)",
+                      "[REDACTED]", text, flags=re.S)
+        text = re.sub(r"-----BEGIN [^\r\n]*(?:\Z)", "[REDACTED]", text)
+        for secret in sorted(self.secrets, key=len, reverse=True):
+            text = text.replace(secret, "[REDACTED]")
+            # Preserve diagnostics on failure without leaking a final partial secret.
+            for size in range(min(len(secret) - 1, len(text)), 0, -1):
+                if text.endswith(secret[:size]):
+                    text = text[:-size] + "[REDACTED]"
+                    break
+        for size in range(min(len("-----BEGIN "), len(text)), 0, -1):
+            if text.endswith("-----BEGIN "[:size]):
+                text = text[:-size] + "[REDACTED]"
+                break
+        return text
+
+    def append(self, stream, text):
+        with self.lock:
+            if text and not self.sealed:
+                self.parts[stream].append(text)
+
+    def finish(self):
+        with self.lock:
+            self.sealed = True
+            # Sanitize streams separately; no inserted separators between chunks.
+            return "\n".join(self.safe("".join(parts)) for parts in self.parts.values() if parts)
+
+
+def _event(message, diagnostics, on_message=None):
+    params = message.get("params")
+    if not isinstance(params, dict) or not isinstance(params.get("update"), dict):
+        raise ValueError
+    update = params["update"]
+    kind = update.get("sessionUpdate")
+    if kind in ("agent_thought_chunk", "user_message_chunk", "tool_call", "tool_call_update"):
+        with diagnostics.lock:
+            diagnostics.message_parts.clear()
+    if kind in ("agent_message_chunk", "agent_thought_chunk", "user_message_chunk"):
+        content = update.get("content", {})
+        if isinstance(content, dict) and content.get("type") == "text" and isinstance(content.get("text"), str):
+            diagnostics.append("acp", content["text"])
+            if kind == "agent_message_chunk" and on_message is not None:
+                with diagnostics.lock:
+                    if diagnostics.sealed:
+                        return
+                    diagnostics.message_parts.append(content["text"])
+                    accumulated = "".join(diagnostics.message_parts)
+                on_message(diagnostics.safe(accumulated))
+    elif kind == "plan":
+        for entry in update.get("entries", []):
+            if isinstance(entry, dict) and isinstance(entry.get("content"), str):
+                diagnostics.append("acp", entry["content"])
+    elif kind in ("tool_call", "tool_call_update"):
+        title = update.get("title")
+        if isinstance(title, str):
+            name, sep, detail = title.partition(":")
+            if sep and name.strip() and detail.strip():
+                diagnostics.append("acp", title)
+
+
+def _reject_constant(_value):
+    raise ValueError
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError
+        result[key] = value
+    return result
+
+
+def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, on_message=None):
+    def send(message):
+        if cancelled.is_set():
+            raise ValueError
+        stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+        stdin.flush()
+
+    send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+    while not cancelled.is_set():
+        line = stdout.readline()
+        if not line or not line.endswith(b"\n"):
+            raise ValueError
+        message = json.loads(line.decode("utf-8"), parse_constant=_reject_constant, object_pairs_hook=_unique_object)
+        if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+            raise ValueError
+        if "method" in message:
+            if not isinstance(message["method"], str) or "result" in message or "error" in message:
+                raise ValueError
+            if "id" in message:
+                if type(message["id"]) not in (int, str):
+                    raise ValueError
+                send({"jsonrpc": "2.0", "id": message["id"],
+                      "error": {"code": -32601, "message": "Method not supported"}})
+            elif message["method"] == "session/update":
+                _event(message, diagnostics, on_message)
+            continue
+        if type(message.get("id")) is not int or message["id"] != request_id:
+            raise ValueError
+        if "error" in message:
+            error = message.get("error")
+            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                raise ACPError(error["message"])
+            raise ValueError
+        if not isinstance(message.get("result"), dict):
+            raise ValueError
+        return message["result"]
+    raise ValueError
+
+
+def _close(resource):
+    if resource is not None:
+        try:
+            resource.close()
+        except Exception:
+            pass
+
+
+def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
+               on_session: Callable[[str], None], on_log: Callable[[str], None],
+               on_started: Callable[[], None], on_message: Callable[[str], None] | None = None) -> dict:
+    """Return sessionId/stopReason or raise RemoteAgentError with a safe message.
+
+    Callbacks persist state in the caller; on_session/on_started run in the ACP
+    worker and must be short, thread-safe operations. Logs are delivered once on
+    completion (also on failure), never as unredacted streaming chunks.
+    """
+    try:
+        prepared = _prepare(task, attachments, config)
+    except Exception:
+        raise RemoteAgentError("Invalid remote agent configuration or task context.") from None
+    host, port, username, auth, base, cwd, shell, timeout, names, text, secrets = prepared
+    diagnostics = _Diagnostics(secrets)
+    ssh = sftp = channel = None
+    stderr_thread = None
+    worker = None
+    cancelled = threading.Event()
+    finished = threading.Event()
+    outcome = {}
+    error = None
+    streams = []
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.load_system_host_keys()
+        ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+        ssh.connect(hostname=host, port=port, username=username, **auth,
+                    allow_agent=False, look_for_keys=False, timeout=CONNECT_TIMEOUT,
+                    auth_timeout=CONNECT_TIMEOUT, banner_timeout=CONNECT_TIMEOUT)
+        transport = ssh.get_transport()
+        if transport is None:
+            raise ValueError
+        transport.set_keepalive(30)
+        sftp = ssh.open_sftp()
+        # Resolve the parent before creating anything; mkdir is exclusive, never stat+overwrite.
+        base = posixpath.normpath(sftp.normalize(base))
+        if not base.startswith("/"):
+            raise ValueError
+        cwd = posixpath.join(base, task["task_id"])
+        if posixpath.dirname(posixpath.normpath(cwd)) != base:
+            raise ValueError
+        # First creation remains exclusive. Resume requires an existing real directory.
+        resume = bool(task.get("comment"))
+        if resume:
+            if not stat.S_ISDIR(sftp.lstat(cwd).st_mode):
+                raise ValueError
+        else:
+            sftp.mkdir(cwd)
+        if posixpath.normpath(sftp.normalize(cwd)) != cwd:
+            raise ValueError
+        if not resume:
+            sftp.putfo(io.BytesIO(text.encode("utf-8")), posixpath.join(cwd, "TASK.md"))
+            for local, name in names:
+                sftp.put(str(local), posixpath.join(cwd, name))
+        prompt = task.get("comment") or PROMPT
+        if not isinstance(prompt, str) or "\x00" in prompt:
+            raise ValueError
+        command = f"cd -- {shlex.quote(cwd)} && exec {shell}"
+        # Own the channel before exec_command: it may itself block waiting for SSH acknowledgement.
+        channel = transport.open_session(timeout=CONNECT_TIMEOUT)
+
+        def stderr_reader():
+            import codecs
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
+            try:
+                while True:
+                    chunk = channel.recv_stderr(4096)
+                    if not chunk:
+                        break
+                    diagnostics.append("stderr", decoder.decode(chunk))
+            except Exception:
+                pass
+            finally:
+                diagnostics.append("stderr", decoder.decode(b"", final=True))
+
+        def execute():
+            nonlocal stderr_thread
+            try:
+                stderr_thread = threading.Thread(target=stderr_reader, daemon=True)
+                stderr_thread.start()
+                on_started()
+                channel.exec_command(command)
+                if cancelled.is_set():
+                    return
+                stdin = channel.makefile_stdin("wb")
+                stdout = channel.makefile("rb")
+                streams.extend((stdin, stdout))
+                initialized = _request(stdin, stdout, 1, "initialize", {
+                    "protocolVersion": 1, "clientCapabilities": {},
+                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message)
+                if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
+                    raise ValueError
+                if task.get("comment"):
+                    session_id = task.get("session_id")
+                    if not isinstance(session_id, str) or not session_id.strip():
+                        raise ValueError
+                    session = _request(stdin, stdout, 2, "session/load", {
+                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message)
+                else:
+                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message)
+                    session_id = session.get("sessionId")
+                    if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
+                        raise ValueError
+                if cancelled.is_set():
+                    return
+                on_session(session_id)
+                result = _request(stdin, stdout, 3, "session/prompt", {
+                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message)
+                reason = result.get("stopReason")
+                if reason not in ("end_turn", "max_tokens", "max_turn_requests", "refusal"):
+                    if reason in ("cancelled", "canceled", "error", "failed"):
+                        outcome["stop_reason"] = reason
+                    raise ValueError
+                if channel.exit_status_ready() and channel.recv_exit_status() != 0:
+                    raise ValueError
+                outcome.update(sessionId=session_id, stopReason=reason)
+            except ACPError as exception:
+                outcome["error"] = diagnostics.safe(str(exception))
+                outcome["failed"] = True
+            except Exception:
+                outcome["failed"] = True
+            finally:
+                finished.set()
+
+        worker = threading.Thread(target=execute, daemon=True)
+        started = time.monotonic()
+        worker.start()
+        if not finished.wait(max(0, timeout - (time.monotonic() - started))):
+            error = "Remote agent timed out."
+        elif outcome.get("failed") or not outcome:
+            error = diagnostics.safe(outcome.get("error") or "Remote agent execution failed.")
+    except Exception:
+        error = "Remote agent preparation or execution failed."
+    finally:
+        cancelled.set()
+        _close(channel)
+        _close(ssh)
+        _close(sftp)
+        if worker is not None and worker.is_alive():
+            worker.join(STDERR_JOIN_TIMEOUT)
+        if stderr_thread is not None:
+            stderr_thread.join(STDERR_JOIN_TIMEOUT)
+        for stream in streams:
+            _close(stream)
+        safe_log = diagnostics.finish()
+        if safe_log:
+            try:
+                on_log(safe_log)
+            except Exception:
+                error = "Remote agent log persistence failed."
+    if error:
+        raise RemoteAgentError(error, stop_reason=outcome.get("stop_reason")) from None
+    return {"sessionId": outcome["sessionId"], "stopReason": outcome["stopReason"]}

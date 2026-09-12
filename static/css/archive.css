@@ -1,0 +1,13 @@
+.archive-page { display:grid; gap:18px; }
+.archive-list { display:grid; gap:10px; }
+.archive-task { display:grid; grid-template-columns:140px minmax(0, 1fr) 170px 90px; gap:16px; align-items:center; padding:16px 18px; border:1px solid var(--border); border-radius:10px; background:var(--surface); cursor:pointer; }
+.archive-task:hover, .archive-task:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 3px var(--accent-soft); }
+.archive-task strong { color:var(--header); }
+.archive-task span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.archive-task time { color:var(--muted); font-size:12px; }
+.archive-task em { color:var(--muted); font-size:11px; font-style:normal; font-weight:700; }
+.archive-empty { padding:40px; color:var(--muted); text-align:center; }
+.pagination { display:flex; justify-content:center; gap:6px; }
+.pagination button { min-width:34px; min-height:34px; border:1px solid var(--border); border-radius:6px; background:var(--surface); cursor:pointer; }
+.pagination button:disabled { color:var(--header); background:var(--accent-soft); border-color:var(--accent); cursor:default; }
+@media (max-width:700px) { .archive-task { grid-template-columns:1fr 1fr; }.archive-task span { grid-column:1 / -1; order:-1; } }

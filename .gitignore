@@ -1,0 +1,36 @@
+.idea
+venv
+dev-venv
+
+# Byte-compiled / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by the PyInstaller utility
+*.manifest
+*.spec
+
+# Translations
+*.mo
+.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Runtime data
+data/

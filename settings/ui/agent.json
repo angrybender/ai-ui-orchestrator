@@ -1,0 +1,33 @@
+{
+  "title": "Agent",
+  "groups": [
+    {
+      "title": "Agent shell",
+      "fields": [
+        {
+          "id": "shell",
+          "type": "string",
+          "required": true,
+          "sub_type": "big"
+        },
+        {
+          "id": "agent_timeout",
+          "type": "integer",
+          "required": true,
+          "default": 7200
+        }
+      ]
+    },
+    {
+      "title": "System append prompt",
+       "fields": [
+         {
+          "id": "prompt",
+          "type": "text",
+          "required": true,
+          "default": "during agent taskl dont request any queries to user, do work after creating plan, if there are several variant implementation -- choose optimal without request"
+        }
+       ]
+    }
+  ]
+}

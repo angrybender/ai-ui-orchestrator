@@ -1,0 +1,11 @@
+fastapi>=0.141.1,<1.0
+starlette>=1.6.0,<2.0
+uvicorn[standard]>=0.30,<1.0
+jinja2>=3.1,<4.0
+pydantic>=2.7,<3.0
+python-multipart>=0.0.9,<1.0
+pytest>=8.0,<9.0
+httpx2>=2.12,<3.0
+# Starlette 1.6 still references anyio.abc.BlockingPortal, deprecated in AnyIO 4.15.
+anyio>=4.14,<4.15
+paramiko>=3.4,<4.0

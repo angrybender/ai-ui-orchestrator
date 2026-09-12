@@ -1,0 +1,16 @@
+{
+  "title": "Tasks",
+  "groups": [
+    {
+      "title": "Base directory",
+      "fields": [
+        {
+          "id": "base_dir",
+          "type": "string",
+          "required": true,
+          "description": "absolute path"
+        }
+      ]
+    }
+  ]
+}

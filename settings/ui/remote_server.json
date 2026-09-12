@@ -1,0 +1,57 @@
+{
+  "title": "Remote server",
+  "groups": [
+    {
+      "title": "Username",
+      "fields": [
+        {
+          "id": "username",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+
+    {
+      "title": "Host:Port",
+      "fields": [
+        {
+          "id": "host",
+          "description": "default port 22",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+
+    {
+      "title": "Authentication",
+      "fields": [
+        {
+          "id": "password",
+          "title": "Password",
+          "type": "password"
+        },
+        {
+          "id": "ssh_key",
+          "type": "string",
+          "title": "SSH key",
+          "sub_type": "big",
+          "description": "absolute path to key file on the host machine"
+        }
+      ]
+    },
+    {
+      "title": "Testing SSH",
+      "fields": [
+        {
+          "id": "test_shell",
+          "title": "Test shell command",
+          "type": "string",
+          "default": "ls",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

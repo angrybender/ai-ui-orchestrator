@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Board · Orchestrator{% endblock %}
+{% block content %}
+<section class="page-heading board-heading"><div></div><button class="button primary" id="new-task-button" type="button">New task <span>＋</span></button></section>
+<section class="board" id="board" aria-label="Kanban board">
+  {% for status in ["BACKLOG", "OPEN", "WAIT", "IN PROGRESS", "REVIEW", "DONE"] %}
+  <section class="board-column" data-status="{{ status }}" aria-labelledby="column-{{ loop.index }}">
+    <header class="column-header"><h2 id="column-{{ loop.index }}">{{ status }}</h2><span class="column-count">0</span></header>
+    <div class="task-list" data-status="{{ status }}"></div>
+  </section>
+  {% endfor %}
+</section>
+<div class="modal-backdrop" id="task-modal" hidden>
+  <div class="task-dialog" role="dialog" aria-modal="true" aria-labelledby="task-dialog-title">
+    <div class="dialog-header"><h2 id="task-dialog-title">New task</h2><button class="icon-button" id="close-task" type="button" aria-label="Close">×</button></div>
+    <form id="task-form" class="task-form">
+      <input type="hidden" id="task-mode" value="create">
+      <input type="hidden" id="task-key">
+      <div class="field-control"><label for="task-id">Task ID</label><input id="task-id" name="task_id" maxlength="120" required><p class="field-error" data-error="task_id"></p></div>
+      <div class="field-control"><label for="task-title">Title</label><input id="task-title" name="title" maxlength="1000" required><p class="field-error" data-error="title"></p></div>
+      <div class="field-control"><label for="task-description">Description</label><textarea id="task-description" name="description" maxlength="32000" required></textarea><p class="field-error" data-error="description"></p></div>
+      <div class="field-control" id="status-control" hidden><label for="task-status">Status</label><select id="task-status" name="status"><option>BACKLOG</option><option>OPEN</option><option>WAIT</option><option>IN PROGRESS</option><option>REVIEW</option><option>DONE</option></select><p class="field-error" data-error="status"></p></div>
+      <div class="field-control"><label>File upload</label><div id="file-upload-list" class="file-upload-list"><div class="file-upload-row"><input class="task-file-input" type="file"><button class="button file-upload-remove" type="button" hidden>Remove</button></div></div><button class="button file-upload-add" id="add-file-upload" type="button">Add file</button><div id="attachment-list" class="attachment-list"></div><p class="field-error" data-error="files"></p></div>
+      <div class="form-actions"><button class="button danger" id="delete-task" type="button" hidden>Delete</button><button class="button" id="cancel-task" type="button">Cancel</button><button class="button" id="reopen-task" type="button" hidden>REOPEN</button><button class="button" id="done-task" type="button" hidden>DONE</button><button class="button" id="archive-task" type="button" hidden>To Archive</button><button class="button primary" id="save-task" type="submit">Save</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block page_scripts %}<link rel="stylesheet" href="{{ url_for('static', path='css/board.css') }}"><script src="{{ url_for('static', path='js/board-live.js') }}"></script><script src="{{ url_for('static', path='js/task-chat.js') }}"></script><script src="{{ url_for('static', path='js/board.js') }}"></script>{% endblock %}
