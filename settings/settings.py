@@ -32,7 +32,10 @@ def load_values(section: dict[str, Any], user_dir: Path | None = None, *, for_ui
     for group in section.get("groups", []):
         for field in group.get("fields", []):
             fallback = (False if field["type"] == "checkbox" else "") if for_ui else None
-            values.setdefault(field["id"], field.get("default", fallback))
+            if for_ui and field["type"] == "password":
+                values[field["id"]] = ""
+            else:
+                values.setdefault(field["id"], field.get("default", fallback))
     return values
 
 

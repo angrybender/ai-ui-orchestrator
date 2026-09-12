@@ -16,4 +16,4 @@
   </div>
 </section>
 {% endblock %}
-{% block page_scripts %}<link rel="stylesheet" href="{{ url_for('static', path='css/board.css') }}"><script>window.openTaskId = {{ task.task_id|tojson }}; window.openTaskStatus = {{ task.status|tojson }};</script><script src="{{ url_for('static', path='js/task-chat.js') }}"></script><script src="{{ url_for('static', path='js/board.js') }}"></script>{% endblock %}
+{% block page_scripts %}<link rel="stylesheet" href="{{ url_for('static', path='css/board.css') }}"><script>window.openTaskId = {{ task.task_id|tojson }}; window.openTaskStatus = {{ task.status|tojson }};</script><script src="{{ url_for('static', path='js/marked.umd.js') }}"></script><script src="{{ url_for('static', path='js/task-chat.js') }}"></script><script src="{{ url_for('static', path='js/board.js') }}"></script>{% endblock %}

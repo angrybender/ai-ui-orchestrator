@@ -54,14 +54,32 @@
       const scrollTop = messages.scrollTop;
       messages.replaceChildren();
       data.messages.forEach((message) => {
-        const node = document.createElement("p");
+        const node = document.createElement("article");
         node.className = `chat-message ${message.role === "user" ? "chat-user" : "chat-agent"}`;
-        const text = document.createElement("span");
-        text.textContent = message.text;
+        const body = document.createElement("div");
+        body.className = "chat-message-body";
+        body.innerHTML = window.marked?.parse(message.text || "", { breaks: true }) || "";
+        const actions = document.createElement("div");
+        actions.className = "chat-message-actions";
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "chat-copy-button";
+        copy.title = "Copy Markdown";
+        copy.setAttribute("aria-label", "Copy message as Markdown");
+        copy.textContent = "⧉";
+        copy.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(message.text || "");
+            window.showToast("Message copied");
+          } catch (error) {
+            window.showToast("Unable to copy message", { type: "error" });
+          }
+        });
         const time = document.createElement("time");
         time.className = "chat-message-time";
         time.textContent = message.updated_at || "";
-        node.append(text, time);
+        actions.append(copy, time);
+        node.append(body, actions);
         messages.append(node);
       });
       lastContent = content;

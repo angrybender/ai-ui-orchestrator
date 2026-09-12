@@ -13,6 +13,7 @@ from controllers.board import router as board_router
 from controllers.archive import router as archive_router
 from controllers.settings import router as settings_router
 from controllers.agent import router as agent_router
+from controllers.git_proxy import router as git_proxy_router
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -31,6 +32,7 @@ app.include_router(board_router)
 app.include_router(archive_router)
 app.include_router(settings_router)
 app.include_router(agent_router)
+app.include_router(git_proxy_router)
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 

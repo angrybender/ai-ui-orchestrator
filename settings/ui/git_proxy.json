@@ -1,0 +1,36 @@
+{
+  "title": "Git proxy",
+  "groups": [
+    {
+      "title": "HTTPS upstream",
+      "fields": [
+        {
+          "id": "remote_host",
+          "description": "Remote host",
+          "type": "string",
+          "required": true
+        },
+        {
+          "id": "token",
+          "description": "Token",
+          "type": "password",
+          "required": true,
+          "sub_type": "big"
+        },
+        {
+          "id": "https_username",
+          "description": "HTTPS username",
+          "type": "string",
+          "required": true,
+          "default": "x-access-token"
+        },
+        {
+          "id": "timeout",
+          "description": "Timeout (seconds)",
+          "type": "integer",
+          "default": 10
+        }
+      ]
+    }
+  ]
+}
