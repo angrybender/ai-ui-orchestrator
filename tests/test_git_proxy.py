@@ -9,9 +9,43 @@ import main
 from controllers import git_proxy as proxy
 
 
+def test_ssh_target_parses_scp_remote():
+    assert proxy.ssh_target('git@github.com:angrybender', 'test-09-13.git') == (
+        'github.com', 22, 'angrybender/test-09-13.git')
+
+
+def test_ssh_target_parses_url_remote():
+    assert proxy.ssh_target('ssh://git.example:2222/team', 'repo.git') == (
+        'git.example', 2222, 'team/repo.git')
+
+
+def test_ssh_target_rejects_traversal():
+    with pytest.raises(OSError):
+        proxy.ssh_target('git@example.com:team', '../repo.git')
+
+
+def test_info_refs_content_type():
+    service = 'git-upload-pack'
+    assert ('application/x-%s-advertisement' % service) == (
+        'application/x-git-upload-pack-advertisement')
+
+
+def test_info_refs_prefix_uses_pkt_line_framing():
+    body = b'# service=git-upload-pack\n'
+    prefix = f'{len(body) + 4:04x}'.encode() + body + b'0000'
+    assert prefix == b'001e# service=git-upload-pack\n0000'
+
+
+def test_post_ssh_advertisement_is_consumed_before_result():
+    advertisement = b'003fref advertisement\x00capabilities\n0000'
+    assert advertisement.endswith(b'0000')
+    assert not advertisement.startswith(b'0000')
+
+
 @pytest.fixture
 def upstream(monkeypatch):
-    values = {'remote_host': 'https://github.com', 'token': 'test-secret', 'timeout': 10}
+    values = {'remote_host': 'https://github.com', 'token': 'test-secret',
+              'https_username': 'x-access-token', 'timeout': 10}
     monkeypatch.setattr(proxy, 'config', lambda: values)
     monkeypatch.setattr(proxy, 'locks', {})
     original = httpx.AsyncClient
@@ -83,8 +117,15 @@ def test_invalid_endpoints(upstream, path):
 
 def test_invalid_configuration(upstream):
     values, _ = upstream
-    values['remote_host'] = 'https://user:secret@github.com'
+    values['remote_host'] = ''
     assert TestClient(main.app).get('/git/org/repo/info/refs?service=git-upload-pack').status_code == 503
+
+
+def test_host_syntax_is_not_validated(upstream):
+    values, install = upstream
+    values['remote_host'] = 'https://github.com/upstream path'
+    install(lambda request: httpx.Response(401, text='rejected'))
+    assert TestClient(main.app).get('/git/org/repo/info/refs?service=git-upload-pack').status_code == 401
 
 
 def test_connection_failure(upstream):

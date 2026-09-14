@@ -65,14 +65,14 @@ def _prepare(task, attachments, config):
     shell = config.get("agent.shell")
     base = config.get("tasks.base_dir")
     password = config.get("remote_server.password") or ""
-    key = config.get("remote_server.ssh_key") or ""
-    if not all(isinstance(v, str) for v in (host, username, shell, base, password, key)):
+    key = ""
+    if not all(isinstance(v, str) for v in (host, username, shell, base, password)):
         raise ValueError
     if not host.strip() or not username.strip() or not shell.strip():
         raise ValueError
     if any(unicodedata.category(c).startswith("C") for c in host + username + base) or "\x00" in shell:
         raise ValueError
-    if not base.startswith("/") or "\\" in base or not (password or key):
+    if not base.startswith("/") or "\\" in base or not password:
         raise ValueError
     # Bracketed IPv6 may carry a port; bare IPv6 uses the default port.
     port = 22
@@ -93,12 +93,6 @@ def _prepare(task, attachments, config):
     timeout = float(timeout_value)
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError
-    key_text = ""
-    if key:
-        path = Path(key)
-        if not path.is_absolute() or not path.is_file():
-            raise ValueError
-        key_text = path.read_text(encoding="utf-8")
     names, used = [], {"task.md"}
     for local, original in attachments:
         if not isinstance(original, str):
@@ -122,8 +116,8 @@ def _prepare(task, attachments, config):
     system_prompt = config.get("agent.prompt")
     if system_prompt:
         text = f"{system_prompt}\n\n{text}"
-    auth = {"key_filename": key} if key else {"password": password}
-    return host, port, username, auth, base, cwd, shell, timeout, names, text, (password, key, key_text)
+    auth = {"password": password}
+    return host, port, username, auth, base, cwd, shell, timeout, names, text, (password,)
 
 
 class _Diagnostics:
@@ -131,7 +125,7 @@ class _Diagnostics:
 
     def __init__(self, secrets):
         self.lock = threading.Lock()
-        self.parts = {"acp": [], "stderr": []}
+        self.parts = {"acp": [], "stderr": [], "exception": []}
         self.message_parts = []
         self.sealed = False
         self.secrets = {s for s in secrets if s}
@@ -365,6 +359,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
 
         def execute():
             nonlocal stderr_thread
+            stage = "remote command startup"
             try:
                 stderr_thread = threading.Thread(target=stderr_reader, daemon=True)
                 stderr_thread.start()
@@ -375,11 +370,13 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 stdin = channel.makefile_stdin("wb")
                 stdout = channel.makefile("rb")
                 streams.extend((stdin, stdout))
+                stage = "initialize"
                 initialized = _request(stdin, stdout, 1, "initialize", {
                     "protocolVersion": 1, "clientCapabilities": {},
                     "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message, raw_log)
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
+                stage = "session/load" if task.get("comment") else "session/new"
                 if task.get("comment"):
                     session_id = task.get("session_id")
                     if not isinstance(session_id, str) or not session_id.strip():
@@ -390,10 +387,12 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log)
                     session_id = session.get("sessionId")
                     if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
-                        raise ValueError
+                        raise ValueError("Missing, invalid or unsafe sessionId")
                 if cancelled.is_set():
                     return
+                stage = "persist sessionId"
                 on_session(session_id)
+                stage = "session/prompt"
                 result = _request(stdin, stdout, 3, "session/prompt", {
                     "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message, raw_log)
                 reason = result.get("stopReason")
@@ -406,10 +405,13 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 outcome.update(sessionId=session_id, stopReason=reason)
             except ACPError as exception:
                 outcome["error"] = diagnostics.safe(str(exception))
-                diagnostics.append("acp", "\n" + str(exception))
+                diagnostics.append("exception", outcome["error"])
                 outcome["failed"] = True
-            except Exception:
-                outcome["failed"] = True
+            except Exception as exception:
+                if not cancelled.is_set():
+                    outcome["error"] = diagnostics.safe(f"{stage}: {type(exception).__name__}: {exception}")
+                    diagnostics.append("exception", outcome["error"])
+                    outcome["failed"] = True
             finally:
                 finished.set()
 

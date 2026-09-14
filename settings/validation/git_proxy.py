@@ -1,32 +1,35 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+from pathlib import Path
 
 
 def validate(values):
     errors = []
     host = values.get('remote_host')
-    try:
-        if not isinstance(host, str) or re.search(r'[\s\\%]', host):
-            raise ValueError
-        parsed = urlsplit(host)
-        if (parsed.scheme != 'https' or not parsed.hostname or parsed.username is not None
-                or parsed.password is not None or parsed.path not in ('', '/')
-                or parsed.query or parsed.fragment or '?' in host or '#' in host
-                or parsed.port == 0):
-            raise ValueError
-    except (ValueError, TypeError):
-        errors.append('remote_host must be an HTTPS host without credentials, path or query')
+    key = values.get('ssh_key')
     token = values.get('token')
-    if not isinstance(token, str) or not token or any(ord(char) < 32 or ord(char) == 127 for char in token):
-        errors.append('token is required and must not contain control characters')
-    username = values.get('https_username', 'x-access-token')
-    if not isinstance(username, str) or not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
-        errors.append('https_username must be a valid Basic Auth username')
+    has_key = isinstance(key, str) and bool(key.strip())
+    has_token = isinstance(token, str) and bool(token.strip())
+
+    if not isinstance(host, str) or not host.strip():
+        errors.append('remote_host is required')
+    if has_key and has_token:
+        errors.append('token and ssh_key cannot be used together')
+    if has_key:
+        if not Path(key).is_file():
+            errors.append('ssh_key must point to an existing file')
+        username = values.get('ssh_username')
+        if not isinstance(username, str) or not username.strip() or not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
+            errors.append('ssh_username is required and must be valid')
+    elif has_token:
+        username = values.get('https_username')
+        if not isinstance(username, str) or not username.strip() or not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
+            errors.append('https_username is required and must be valid')
+    else:
+        errors.append('token or ssh_key is required')
+
     timeout = values.get('timeout', 10)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
         errors.append('timeout must be a positive integer in seconds')
-    if values.get('ssh_key'):
-        errors.append('SSH transport is not supported in this iteration')
     return errors

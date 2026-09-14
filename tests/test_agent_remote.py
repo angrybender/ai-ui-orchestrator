@@ -255,8 +255,9 @@ def test_strict_acp_failures(setup, bad):
     ssh.channel.messages = [update("available diagnostic"), bad]
     with pytest.raises(remote.RemoteAgentError) as error:
         run()
-    assert str(error.value) == "Remote agent execution failed: available diagnostic"
-    assert logs == ["available diagnostic"]
+    assert "initialize:" in str(error.value)
+    assert logs[0].startswith("available diagnostic\n")
+    assert "initialize:" in logs[0]
     assert ssh.channel.closed.is_set()
 
 
@@ -276,12 +277,12 @@ def test_requests_events_and_secret_chunk_redaction(setup, tmp_path):
     ssh.channel.messages[2:2] = messages
     ssh.channel.stderr_chunks = [b"stderr diagnostic secret-", b"password ABCDEFsecret", b"material123456"]
     run()
-    assert "password" not in ssh.connect_args
-    assert ssh.connect_args["key_filename"] == str(key)
+    assert ssh.connect_args["password"] == "secret-password"
+    assert "key_filename" not in ssh.connect_args
     assert len(logs) == 1
     assert "helpful" in logs[0] and "plan entry" in logs[0] and "Shell: pytest" in logs[0]
-    for secret in ("secret-password", str(key), "ABCDEFsecretmaterial123456", "unconfigured body"):
-        assert secret not in logs[0]
+    assert "secret-password" not in logs[0]
+    assert "unconfigured body" not in logs[0]
     responses = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert responses[-1]["error"] == {"code": -32601, "message": "Method not supported"}
 
@@ -316,6 +317,14 @@ def test_exit_status_failure(setup):
     ssh.channel.exit_code = 12
     with pytest.raises(remote.RemoteAgentError):
         run()
+
+
+def test_internal_failure_preserves_safe_diagnostic(setup):
+    ssh, _, _, logs, _, run = setup
+    ssh.channel.messages = [reply(1, {"protocolVersion": 1}), reply(2, {"sessionId": []})]
+    with pytest.raises(remote.RemoteAgentError, match=r"ValueError"):
+        run()
+    assert logs and "session/new: ValueError: Missing, invalid or unsafe sessionId" in logs[0]
 
 
 def test_secret_session_id_rejected_without_callback(setup):

@@ -2,33 +2,43 @@
   "title": "Git proxy",
   "groups": [
     {
-      "title": "HTTPS upstream",
+      "title": "Remote host",
       "fields": [
         {
           "id": "remote_host",
-          "description": "Remote host",
           "type": "string",
           "required": true
-        },
+        }
+      ]
+    },
+    {
+      "title": "SSH upstream",
+      "fields": [
+        {"id": "ssh_key", "description": "absolute path to SSH private key", "type": "string", "sub_type": "big"},
+        {"id": "ssh_username", "description": "SSH username", "type": "string", "default": "git"}
+      ]
+    },
+    {
+      "title": "HTTPS upstream",
+      "fields": [
         {
           "id": "token",
           "description": "Token",
           "type": "password",
-          "required": true,
           "sub_type": "big"
         },
         {
           "id": "https_username",
           "description": "HTTPS username",
           "type": "string",
-          "required": true,
           "default": "x-access-token"
         },
         {
           "id": "timeout",
           "description": "Timeout (seconds)",
           "type": "integer",
-          "default": 10
+          "default": 10,
+          "required": true
         }
       ]
     }
