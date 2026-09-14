@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -31,18 +32,29 @@ def settings(request: Request, section: str | None = None):
             "sections": sections,
             "selected": selected,
             "values": settings_store.load_values(selected),
+            "proxy_errors": getattr(getattr(request.app.state, "http_proxies", None), "errors", []),
         },
     )
 
 
 @router.post("/api/settings/{section_key}")
-def save_settings(section_key: str, payload: SettingsPayload):
+def save_settings(section_key: str, payload: SettingsPayload, request: Request):
     section = next((item for item in settings_store.load_sections() if item["key"] == section_key), None)
     if section is None:
         raise HTTPException(status_code=404, detail="Settings section not found")
-    try:
-        values = settings_store.validate_values(section, payload.values)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=error.args[0]) from error
-    settings_store.save_values(section_key, values)
-    return {"ok": True, "values": values}
+    proxies = getattr(request.app.state, "http_proxies", None) if section_key == "http_proxy" else None
+    with proxies.save_lock if proxies is not None else nullcontext():
+        try:
+            values = settings_store.validate_values(section, payload.values)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=error.args[0]) from error
+        try:
+            settings_store.save_values(section_key, values)
+        except OSError:
+            if section_key != "http_proxy":
+                raise
+            raise HTTPException(status_code=500, detail="HTTP proxy: could not save configuration.") from None
+        result = {"ok": True, "values": values}
+        if section_key == "http_proxy":
+            result["restart_required"] = proxies.apply_policies(values) if proxies is not None else True
+        return result

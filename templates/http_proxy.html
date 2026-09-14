@@ -1,0 +1,36 @@
+<form id="http-proxy-form" class="settings-form http-proxy-form" data-section="http_proxy" data-proxies='{{ values.proxies|tojson }}'>
+  {% if proxy_errors %}<div class="proxy-errors" role="alert">{% for error in proxy_errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
+  <div id="proxies"></div>
+  <div class="proxy-add"><button type="button" class="button" id="add-proxy">Add proxy</button></div>
+  <div class="form-actions"><button class="button primary" type="submit">Save</button></div>
+</form>
+<template id="proxy-template">
+  <section class="field-group proxy-block" aria-label="Proxy">
+    <div class="field-group-title">Proxy</div>
+    <div class="group-fields proxy-fields">
+      <div class="proxy-numbers">
+        <label><input name="port" type="number" min="8001" max="65535" step="1" placeholder="Port" aria-label="Port" required><span class="field-description">port</span></label>
+        <label><input name="timeout" type="number" min="1" step="1" placeholder="timeout" aria-label="Timeout" value="30" required><span class="field-description">http timeout</span></label>
+      </div>
+      <input name="remote_url" type="url" placeholder="remote URL" aria-label="Remote URL" required>
+      <div class="proxy-list" data-kind="methods"></div>
+      <div class="proxy-list" data-kind="patterns"></div>
+      <div class="proxy-remove"><button class="button" type="button" data-action="remove-proxy">Remove proxy</button></div>
+    </div>
+  </section>
+</template>
+<template id="proxy-method-template">
+  <div class="proxy-rule method-rule">
+    <label><select name="method" aria-label="Method"><option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option><option>ALL</option></select><span class="field-description">method</span></label>
+    <button class="button" type="button" data-action="add-rule" aria-label="Add method">+</button>
+    <button class="button" type="button" data-action="remove-rule" aria-label="Remove method">-</button>
+  </div>
+</template>
+<template id="proxy-pattern-template">
+  <div class="proxy-rule pattern-rule">
+    <button class="button" type="button" data-action="operator" aria-label="Pattern operator">=</button>
+    <label><input name="pattern" placeholder="pattern" aria-label="Pattern"><span class="field-description">pattern</span></label>
+    <button class="button" type="button" data-action="add-rule" aria-label="Add pattern">+</button>
+    <button class="button" type="button" data-action="remove-rule" aria-label="Remove pattern">-</button>
+  </div>
+</template>

@@ -1,0 +1,42 @@
+.http-proxy-form .proxy-fields { gap: 20px; }
+.http-proxy-form input,
+.http-proxy-form select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #cccbd7;
+  border-radius: 7px;
+  outline: 0;
+  color: #323144;
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+}
+.http-proxy-form input:focus,
+.http-proxy-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.http-proxy-form input::placeholder { color: #aaa8b7; }
+.http-proxy-form label { min-width: 0; }
+.http-proxy-form .field-description { display: block; }
+.proxy-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 225px)); gap: 30px; }
+.proxy-fields > [name="remote_url"] { width: 90%; }
+.proxy-list { display: grid; gap: 14px; }
+.proxy-rule { display: grid; gap: 14px; align-items: start; }
+.method-rule { grid-template-columns: minmax(0, 225px) 44px 44px; }
+.pattern-rule { grid-template-columns: 44px minmax(0, 1fr) 44px 44px; }
+.proxy-rule .button { min-width: 0; width: 44px; padding: 9px; }
+.http-proxy-form .button:disabled { opacity: .45; cursor: not-allowed; }
+.proxy-remove { display: flex; width: max-content; max-width: 100%; justify-content: flex-end; }
+.proxy-add { display: flex; width: max-content; max-width: 100%; justify-content: flex-end; margin: 28px 0 0 calc(20% + 26px); }
+.proxy-errors { color: #b42318; }
+@media (max-width: 900px) { .proxy-add { margin-left: 151px; } }
+@media (max-width: 560px) {
+  .proxy-numbers { gap: 12px; }
+  .proxy-fields > [name="remote_url"] { width: 100%; }
+  .proxy-add { margin-left: 0; }
+  .proxy-rule { gap: 6px; }
+  .pattern-rule { grid-template-columns: 32px minmax(0, 1fr) 32px 32px; }
+  .method-rule { grid-template-columns: minmax(0, 1fr) 32px 32px; }
+  .proxy-rule .button { width: 32px; }
+}

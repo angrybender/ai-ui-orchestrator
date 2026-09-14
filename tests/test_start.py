@@ -82,6 +82,8 @@ def test_supervisor_starts_both_and_stops_them(monkeypatch):
     monkeypatch.setattr(start.subprocess, 'Popen', spawn)
     assert start.serve(stop, '127.0.0.1', 9000, 2) == 0
     assert calls[0][0][1:] == ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '9000']
+    assert calls[0][1]['env']['APP_WEB_HOST'] == '127.0.0.1'
+    assert calls[0][1]['env']['APP_WEB_PORT'] == '9000'
     assert calls[1][0][-2:] == ['--poll-interval', '2']
     for child in children:
         child.terminate.assert_called_once()

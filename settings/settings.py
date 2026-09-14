@@ -19,11 +19,15 @@ def load_sections(ui_dir: Path | None = None) -> list[dict[str, Any]]:
             section = json.load(file)
         section["key"] = path.stem
         sections.append(section)
+    sections.append({"key": "http_proxy", "title": "HTTP proxy"})
     return sections
 
 
 def load_values(section: dict[str, Any], user_dir: Path | None = None, *, for_ui: bool = True) -> dict[str, Any]:
     user_dir = user_dir or USER_SETTINGS_DIR
+    if section["key"] == "http_proxy":
+        from . import http_proxy
+        return http_proxy.load_values(user_dir)
     path = user_dir / f"{section['key']}.json"
     values: dict[str, Any] = {}
     if path.exists():
@@ -38,6 +42,9 @@ def load_values(section: dict[str, Any], user_dir: Path | None = None, *, for_ui
 
 def save_values(section_key: str, values: dict[str, Any], user_dir: Path | None = None) -> None:
     user_dir = user_dir or USER_SETTINGS_DIR
+    if section_key == "http_proxy":
+        from . import http_proxy
+        return http_proxy.save_values(values, user_dir)
     user_dir.mkdir(parents=True, exist_ok=True)
     path = user_dir / f"{section_key}.json"
     with path.open("w", encoding="utf-8") as file:
@@ -59,6 +66,11 @@ def validate_section(section_key: str, values: dict[str, Any], validation_dir: P
 
 
 def validate_values(section: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    if section.get("key") == "http_proxy":
+        from . import http_proxy
+        normalized = http_proxy.validate_values(values, http_proxy.application_address()[1])
+        http_proxy.check_availability(normalized)
+        return normalized
     errors = []
     fields = {field["id"]: field for group in section.get("groups", []) for field in group.get("fields", [])}
     normalized: dict[str, Any] = {}

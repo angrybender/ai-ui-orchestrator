@@ -22,8 +22,16 @@ DATABASE_PATH = DATA_DIR / "app.db"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from http_proxy import ProxyServers
+
     init_database()
-    yield
+    proxies = ProxyServers()
+    app.state.http_proxies = proxies
+    await proxies.start()
+    try:
+        yield
+    finally:
+        await proxies.stop()
 
 
 app = FastAPI(title="AI UI Orchestrator", version="0.1.0", lifespan=lifespan)

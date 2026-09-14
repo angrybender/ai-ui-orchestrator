@@ -23,7 +23,10 @@ def serve(stop: threading.Event, host: str, port: int, interval: float) -> int:
         for name, command in commands:
             if stop.is_set():
                 return 0
-            process = subprocess.Popen(command, cwd=BASE_DIR, stdin=subprocess.DEVNULL, **process_options())
+            options = process_options()
+            if name == 'web':
+                options['env'] = {**os.environ, 'APP_WEB_HOST': host, 'APP_WEB_PORT': str(port)}
+            process = subprocess.Popen(command, cwd=BASE_DIR, stdin=subprocess.DEVNULL, **options)
             processes.append((name, process))
         logger.info('Web server: http://%s:%s; consumer enabled.', host, port)
         while not stop.wait(0.2):

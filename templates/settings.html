@@ -6,6 +6,9 @@
   <a class="settings-tab {% if section.key == selected.key %}is-active{% endif %}" href="/settings?section={{ section.key }}">{{ section.title }}</a>
   {% endfor %}
 </nav>
+{% if selected.key == 'http_proxy' %}
+{% include 'http_proxy.html' %}
+{% else %}
 <form id="settings-form" class="settings-form" data-section="{{ selected.key }}">
   {% for group in selected.groups %}
   <section class="field-group" aria-labelledby="group-title-{{ loop.index }}">
@@ -35,7 +38,13 @@
     <button class="button primary" type="submit">Save</button>
   </div>
 </form>
+{% endif %}
 {% endblock %}
 {% block page_scripts %}
+{% if selected.key == 'http_proxy' %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/http-proxy.css') }}">
+<script src="{{ url_for('static', path='js/http-proxy.js') }}"></script>
+{% else %}
 <script src="{{ url_for('static', path='js/settings.js') }}"></script>
+{% endif %}
 {% endblock %}
