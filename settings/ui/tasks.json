@@ -46,6 +46,17 @@
           "description": "Init timeout in seconds."
         }
       ]
+    },
+    {
+      "title": "Log retention",
+      "fields": [
+        {
+          "id": "logs_max_age",
+          "type": "integer",
+          "default": 86400,
+          "description": "At application startup, delete session logs in data/logs last modified more than this many seconds ago. Changes apply on restart; 0 removes all older files."
+        }
+      ]
     }
   ]
 }

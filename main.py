@@ -23,8 +23,11 @@ DATABASE_PATH = DATA_DIR / "app.db"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from http_proxy import ProxyServers
+    from log_cleanup import cleanup_session_logs
+    from settings.config import Config
 
     init_database()
+    cleanup_session_logs(DATA_DIR / "logs", Config.get("tasks.logs_max_age"))
     proxies = ProxyServers()
     app.state.http_proxies = proxies
     await proxies.start()
