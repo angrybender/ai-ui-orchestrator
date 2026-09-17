@@ -48,7 +48,7 @@ def test_missing_directory_requires_connection(remote):
 @pytest.mark.parametrize("failure", ["connect", "remove", "rmdir", "permission", "verify"])
 def test_remote_errors_preserve_database_and_files(remote, monkeypatch, failure):
     ssh, sftp, config = remote
-    monkeypatch.setattr(board_store.Config, "get", config.get)
+    monkeypatch.setattr(board_store, "Config", SimpleNamespace(get=config.get))
     if failure == "connect":
         ssh.connect.side_effect = OSError("secret")
     elif failure == "permission":
@@ -102,7 +102,7 @@ def test_non_archived_and_missing_tasks_do_not_connect(remote):
 @pytest.mark.parametrize("failure", [None, "missing", "missing_base", "offline", "timeout", "ssh"])
 def test_backlog_delete_removes_local_data(remote, monkeypatch, failure):
     ssh, sftp, config = remote
-    monkeypatch.setattr(board_store.Config, "get", config.get)
+    monkeypatch.setattr(board_store, "Config", SimpleNamespace(get=config.get))
     if failure == "missing_base":
         sftp.normalize.side_effect = FileNotFoundError(errno.ENOENT, "missing")
     elif failure == "missing":
@@ -125,7 +125,7 @@ def test_backlog_delete_removes_local_data(remote, monkeypatch, failure):
 @pytest.mark.parametrize("failure", ["lstat", "listdir_attr", "remove", "rmdir"])
 def test_backlog_delete_failure_preserves_local_data(remote, monkeypatch, failure):
     ssh, sftp, config = remote
-    monkeypatch.setattr(board_store.Config, "get", config.get)
+    monkeypatch.setattr(board_store, "Config", SimpleNamespace(get=config.get))
     getattr(sftp, failure).side_effect = PermissionError(errno.EACCES, "secret")
     board_store.init_database()
     task = board_store.create_task("TASK-1", "Title", "Details", [("file.txt", "text/plain", b"data")])
