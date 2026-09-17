@@ -8,10 +8,11 @@ from settings import settings as settings_store
 
 @pytest.fixture(scope='session', autouse=True)
 def cleanup_test_logs():
-    yield
     logs_dir = Path(main.BASE_DIR) / 'data' / 'logs'
+    existing = set(logs_dir.glob('test-*.log')) if logs_dir.exists() else set()
+    yield
     if logs_dir.exists():
-        for path in logs_dir.glob('test-*.log'):
+        for path in set(logs_dir.glob('test-*.log')) - existing:
             path.unlink(missing_ok=True)
 
 

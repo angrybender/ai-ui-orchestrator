@@ -27,6 +27,7 @@ CONFIG = {
     "agent.agent_timeout": 60,
     "agent.prompt": "Системные инструкции\nВыполни проверки.",
     "agent.continue_session_arg": "--continue",
+    "tasks.init_script_path": "", "tasks.init_script_text": "", "tasks.init_script_timeout": 300,
 }
 
 
@@ -77,6 +78,7 @@ def _concurrent_worker(database, files, barrier, release, sessions, results, out
 
     board_store.DATABASE_PATH = Path(database)
     board_store.FILES_DIR = Path(files)
+    agent_worker.settings_store.USER_SETTINGS_DIR = Path(database).parent / "settings"
     agent_worker.Config.get = staticmethod(CONFIG.__getitem__)
 
     def transport(task, attachments, config, on_session, on_log, on_started, on_message):

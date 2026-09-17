@@ -47,9 +47,16 @@ def save_values(section_key: str, values: dict[str, Any], user_dir: Path | None 
         return http_proxy.save_values(values, user_dir)
     user_dir.mkdir(parents=True, exist_ok=True)
     path = user_dir / f"{section_key}.json"
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(values, file, ensure_ascii=False, indent=2)
-        file.write("\n")
+    from .locking import configuration_lock
+    import os
+    from uuid import uuid4
+    with configuration_lock(user_dir):
+        temporary = path.with_name(path.name + '.' + uuid4().hex + '.tmp')
+        try:
+            temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def validate_section(section_key: str, values: dict[str, Any], validation_dir: Path | None = None) -> list[str]:
@@ -91,11 +98,13 @@ def validate_values(section: dict[str, Any], values: dict[str, Any]) -> dict[str
                 errors.append(f"{field_id}: expected a valid integer")
                 continue
         elif isinstance(value, str):
-            value = value.strip()
+            if not (section["key"] == "tasks" and field_id == "init_script_text"):
+                value = value.strip()
         if field.get("required") and not value:
             errors.append(f"{field_id}: field is required")
         normalized[field_id] = value
-    errors.extend(validate_section(section["key"], normalized))
+    if not errors or section["key"] != "tasks":
+        errors.extend(validate_section(section["key"], normalized))
     if errors:
         raise ValueError(errors)
     return normalized

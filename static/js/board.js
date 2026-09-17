@@ -78,7 +78,8 @@
         if (task.status === "IN PROGRESS") {
           const extra = document.createElement("div");
           extra.className = "task-extra-status";
-          extra.innerHTML = "<span></span>In progress";
+          extra.append(document.createElement("span"), document.createTextNode(
+            ["Init", "Agent"].includes(task.phase) ? task.phase : "In progress"));
           card.append(extra);
         }
         card.addEventListener("click", (event) => {

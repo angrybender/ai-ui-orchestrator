@@ -149,3 +149,11 @@ def test_backlog_endpoint_rejects_other_statuses(remote, status):
         assert client.delete("/api/board/tasks/MISSING").status_code == 404
     ssh.connect.assert_not_called()
 
+
+
+def test_delete_requires_configured_base_directory(remote):
+    ssh, sftp, config = remote
+    config.pop('tasks.base_dir')
+    with pytest.raises(RemoteAgentError):
+        task_remote.delete_task_directory('TASK-1', config)
+    ssh.connect.assert_not_called()

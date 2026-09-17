@@ -49,3 +49,8 @@ window.showToast(message, options)
 - не блокирует взаимодействие пользователя со страницей.
 
 Стили и логика виджета подключаются глобально из `static/css/toast.css` и `static/js/toast.js`.
+
+
+### UI цикла задачи
+
+Проверка пути Init в Settings Tasks использует общий Spinner и Toast. Новые поля располагаются в существующей двухколоночной форме без заголовка страницы. Board использует существующий индикатор с метками In progress / Init / Agent; чат показывает системную ошибку Init как текст. Поля и Save — [settings.md](settings.md), индикатор — [board.md](board.md), сообщения — [task-chat.md](task-chat.md), цикл выполнения — [agent.md](agent.md).

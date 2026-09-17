@@ -98,6 +98,13 @@ class FakeSFTP:
             raise OSError("secret-password existing directory")
         self.dirs.add(path)
 
+    def lstat(self, path):
+        import stat
+        from types import SimpleNamespace
+        if path not in self.dirs:
+            raise FileNotFoundError(path)
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755)
+
     def putfo(self, source, path):
         assert isinstance(source, io.BytesIO)
         if self.fail_upload:
@@ -187,13 +194,38 @@ def test_success_context_auth_and_protocol(setup, tmp_path, system_prompt):
     assert ssh.connect_args["port"] == 2222
     assert ssh.connect_args["allow_agent"] is False and ssh.connect_args["look_for_keys"] is False
     command = ssh.channel.command
-    assert command == "cd -- /tasks/PRJ-12 && exec agent --acp -p ${PROMPT}"
+    import shlex
+    assert command == "cd -- /tasks/PRJ-12 && exec agent --acp -p " + shlex.quote(remote.PROMPT)
     assert task["description"] not in command
     requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert [r["method"] for r in requests] == ["initialize", "session/new", "session/prompt"]
     assert requests[0]["params"]["clientInfo"]["name"] == "task-orchestrator"
     assert requests[1]["params"] == {"cwd": "/tasks/PRJ-12", "mcpServers": []}
     assert requests[2]["params"]["prompt"][0]["text"] == remote.PROMPT
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_acp_shell_without_prompt_placeholder(setup, resume):
+    ssh, config, task, _, sessions, run = setup
+    config["agent.shell"] = "qwen --acp --yolo --output-format stream-json --model openai/gpt-5.6-luna"
+    if resume:
+        task["session_id"] = "saved-session"
+        task["comment"] = "Continue; $(do not execute) 'quoted'"
+        ssh.sftp.dirs.add("/tasks/PRJ-12")
+        ssh.channel.messages[1] = reply(2, {})
+
+    result = run()
+
+    assert result["stopReason"] == "end_turn"
+    assert ssh.channel.command == "cd -- /tasks/PRJ-12 && exec " + config["agent.shell"]
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert [r["method"] for r in requests] == [
+        "initialize", "session/load" if resume else "session/new", "session/prompt"]
+    assert requests[2]["params"] == {
+        "sessionId": "saved-session" if resume else "session-1",
+        "prompt": [{"type": "text", "text": task["comment"] if resume else remote.PROMPT}],
+    }
+    assert sessions == ["saved-session" if resume else "session-1"]
 
 
 @pytest.mark.parametrize("task_id", ["", ".", "..", "../outside", "a\\b", "a\x00b", "a\nb", "a\x7fb"])
@@ -277,8 +309,10 @@ def test_requests_events_and_secret_chunk_redaction(setup, tmp_path):
     ssh.channel.messages[2:2] = messages
     ssh.channel.stderr_chunks = [b"stderr diagnostic secret-", b"password ABCDEFsecret", b"material123456"]
     run()
-    assert ssh.connect_args["password"] == "secret-password"
-    assert "key_filename" not in ssh.connect_args
+    assert ssh.connect_args["key_filename"] == str(key)
+    assert "password" not in ssh.connect_args
+    assert "ABCDEFsecretmaterial123456" not in logs[0]
+    assert str(key) not in logs[0]
     assert len(logs) == 1
     assert "helpful" in logs[0] and "plan entry" in logs[0] and "Shell: pytest" in logs[0]
     assert "secret-password" not in logs[0]

@@ -35,6 +35,16 @@ def init_database() -> None:
                 ON agent_runs(task_pk) WHERE state IN ('PREPARING', 'RUNNING');
         """)
 
+        columns = {row['name'] for row in connection.execute('PRAGMA table_info(agent_runs)')}
+        migrate_ownership = 'phase' not in columns
+        for name, definition in {'phase': "TEXT NOT NULL DEFAULT 'In progress'",
+                                 'init_pid': 'INTEGER', 'init_result': 'TEXT',
+                                 'init_uncertain': 'INTEGER NOT NULL DEFAULT 0'}.items():
+            if name not in columns:
+                connection.execute(f'ALTER TABLE agent_runs ADD COLUMN {name} {definition}')
+        if migrate_ownership:
+            connection.execute("UPDATE board_tasks SET active_run_id = (SELECT id FROM agent_runs WHERE task_pk = board_tasks.id AND state IN ('PREPARING', 'RUNNING')) WHERE status = 'IN PROGRESS'")
+
 
 def process_identity(pid: int) -> str | None:
     if os.name == 'nt':
@@ -57,28 +67,40 @@ def active_run() -> dict | None:
         return dict(row) if row else None
 
 
-def finish(run_id: str, error: str | None = None, stop_reason: str | None = None) -> None:
+def finish(run_id: str, error: str | None = None, stop_reason: str | None = None, *, init_error=False, uncertain=False) -> None:
     with board_store.connect() as connection:
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute(f'SELECT * FROM agent_runs WHERE id = ? AND {ACTIVE}', (run_id,)).fetchone()
         if row is None:
             return
+        if row['phase'] == 'Init' and row['init_result'] != 'SUCCEEDED':
+            init_error = True
+            uncertain = uncertain or bool(row['init_uncertain'])
+        if uncertain:
+            connection.execute('UPDATE board_tasks SET init_uncertain = 1 WHERE id = ?', (row['task_pk'],))
+        if init_error:
+            connection.execute("UPDATE agent_runs SET init_result = 'FAILED', init_uncertain = ? WHERE id = ?", (uncertain, run_id))
+            error = error or 'Init script error: executor interrupted'
+            if not error.startswith('Init script error'):
+                error = 'Init script error: ' + error
+            if uncertain:
+                error += '\nRemote stop unconfirmed; retry blocked pending verification.'
         connection.execute(
             'UPDATE agent_runs SET state = ?, finished_at = ?, error = ?, stop_reason = ? WHERE id = ?',
             ('FAILED' if error else 'SUCCEEDED', time.time(), error, stop_reason, run_id),
         )
         connection.execute(
-            'UPDATE board_tasks SET status = ?, is_error = ? WHERE id = ? AND status = \'IN PROGRESS\'',
-            ('WAIT' if error else 'REVIEW', bool(error), row['task_pk']),
+            'UPDATE board_tasks SET status = ?, is_error = ? WHERE id = ? AND status = \'IN PROGRESS\' AND active_run_id = ?',
+            ('WAIT' if error else 'REVIEW', bool(error), row['task_pk'], run_id),
         )
         if error and row['task_pk'] is not None:
             updated_at = "strftime('%Y-%m-%d %H:%M', 'now', 'localtime')"
             connection.execute(
-                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, 'agent', ?, ?, {updated_at}) "
+                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, ?, ?, ?, {updated_at}) "
                 "ON CONFLICT(task_pk, run_id, role) DO UPDATE SET "
                 "text = task_chat_messages.text || char(10) || char(10) || excluded.text, "
                 "updated_at = excluded.updated_at",
-                (row['task_pk'], error, run_id),
+                (row['task_pk'], 'system' if init_error else 'agent', error, run_id),
             )
 
 
@@ -88,7 +110,7 @@ def recover() -> None:
         return
     try:
         identity = process_identity(row['pid'])
-        expired = time.time() - (row['started_at'] or row['created_at']) > row['timeout']
+        expired = time.time() - (row['started_at'] or row['created_at']) > row['timeout'] + (10 if row['phase'] == 'Init' else 0)
         if identity == row['process_token']:
             if not expired:
                 return
@@ -103,7 +125,7 @@ def recover() -> None:
                 if time.time() - (current['started_at'] or current['created_at']) <= current['timeout']:
                     return
                 if terminate_process(row['pid'], row['process_token']):
-                    finish(row['id'], 'Agent executor expired.')
+                    finish(row['id'], 'Agent executor expired.', uncertain=row['phase'] == 'Init')
                 return
             # pidfd prevents signalling an unrelated process after PID reuse.
             fd = os.pidfd_open(row['pid'])
@@ -128,9 +150,9 @@ def recover() -> None:
                     return
             finally:
                 os.close(fd)
-        finish(row['id'], 'Agent executor expired.' if expired else 'Agent executor terminated.')
+        finish(row['id'], 'Agent executor expired.' if expired else 'Agent executor terminated.', uncertain=row['phase'] == 'Init')
     except ProcessLookupError:
-        finish(row['id'], 'Agent executor terminated.')
+        finish(row['id'], 'Agent executor terminated.', uncertain=row['phase'] == 'Init')
     except (OSError, AttributeError):
         # An unverifiable owner must not be replaced by another session.
         return
@@ -142,7 +164,7 @@ def claim(timeout: float) -> dict | None:
         connection.execute('BEGIN IMMEDIATE')
         if connection.execute(f'SELECT 1 FROM agent_runs WHERE {ACTIVE}').fetchone():
             return None
-        task = connection.execute("SELECT * FROM board_tasks WHERE status = 'OPEN' ORDER BY sort_order, id LIMIT 1").fetchone()
+        task = connection.execute("SELECT * FROM board_tasks WHERE status = 'OPEN' AND init_uncertain = 0 ORDER BY sort_order, id LIMIT 1").fetchone()
         if task is None:
             return None
         run_id = uuid4().hex
@@ -153,7 +175,7 @@ def claim(timeout: float) -> dict | None:
             "INSERT INTO agent_runs(id, task_pk, state, pid, process_token, created_at, timeout) VALUES (?, ?, 'PREPARING', ?, ?, ?, ?)",
             (run_id, task['id'], os.getpid(), token, time.time(), timeout),
         )
-        cursor = connection.execute("UPDATE board_tasks SET status = 'IN PROGRESS', is_error = 0 WHERE id = ? AND status = 'OPEN'", (task['id'],))
+        cursor = connection.execute("UPDATE board_tasks SET status = 'IN PROGRESS', is_error = 0, phase = 'In progress', active_run_id = ? WHERE id = ? AND status = 'OPEN'", (run_id, task['id']))
         if cursor.rowcount != 1:
             raise RuntimeError('Task claim failed.')
         comment = connection.execute(
@@ -165,14 +187,16 @@ def claim(timeout: float) -> dict | None:
             (task['id'],),
         ).fetchone()
         return {'id': run_id, 'task_id': task['task_id'], 'comment': comment['text'] if comment else None,
-                'session_id': previous['session_id'] if previous else None}
+                'session_id': previous['session_id'] if previous else None,
+                'remote_cwd': task['remote_cwd'], 'remote_identity': task['remote_identity'],
+                'context_ready': bool(task['context_ready']), 'init_succeeded': bool(task['init_succeeded'])}
 
 
 def message(run_id: str, text: str) -> None:
     """Replace this run's already sanitized agent response, never its diagnostics."""
     with board_store.connect() as connection:
         connection.execute('BEGIN IMMEDIATE')
-        row = connection.execute(f'SELECT task_pk FROM agent_runs WHERE id = ? AND {ACTIVE}', (run_id,)).fetchone()
+        row = connection.execute(f'SELECT task_pk FROM agent_runs WHERE id = ? AND {ACTIVE} AND EXISTS (SELECT 1 FROM board_tasks WHERE id = task_pk AND active_run_id = agent_runs.id)', (run_id,)).fetchone()
         if row is None or row['task_pk'] is None:
             return
         updated_at = "strftime('%Y-%m-%d %H:%M', 'now', 'localtime')"

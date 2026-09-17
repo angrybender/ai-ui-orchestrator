@@ -59,8 +59,11 @@
         const body = document.createElement("div");
         body.className = "chat-message-body";
         const markdown = window.marked?.parse || window.marked?.marked;
-        const rendered = typeof markdown === "function" ? markdown(message.text || "", { breaks: true }) : null;
-        if (rendered === null) {
+        const rendered = message.role !== "system" && typeof markdown === "function" ? markdown(message.text || "", { breaks: true }) : null;
+        if (message.role === "system") {
+          body.textContent = message.text || "";
+          body.style.whiteSpace = "pre-wrap";
+        } else if (rendered === null) {
           body.textContent = message.text || "";
           window.showToast("Markdown renderer unavailable", { type: "error" });
         } else {

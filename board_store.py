@@ -144,6 +144,29 @@ def init_database() -> None:
             connection.execute("DROP TABLE board_attachments_old")
             connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("CREATE INDEX IF NOT EXISTS board_tasks_status_order ON board_tasks(status, sort_order)")
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(board_tasks)")}
+        for name, definition in {
+            'phase': "TEXT NOT NULL DEFAULT 'In progress'",
+            'active_run_id': 'TEXT', 'remote_cwd': 'TEXT', 'remote_identity': 'TEXT',
+            'context_ready': 'INTEGER NOT NULL DEFAULT 0',
+            'init_succeeded': 'INTEGER NOT NULL DEFAULT 0',
+            'init_uncertain': 'INTEGER NOT NULL DEFAULT 0',
+        }.items():
+            if name not in columns:
+                connection.execute(f'ALTER TABLE board_tasks ADD COLUMN {name} {definition}')
+        chat_sql = connection.execute("SELECT sql FROM sqlite_master WHERE name = 'task_chat_messages'").fetchone()[0]
+        if "'system'" not in chat_sql:
+            connection.execute("ALTER TABLE task_chat_messages RENAME TO old_chat")
+            connection.execute("""CREATE TABLE task_chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, task_pk INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('agent', 'user', 'system')),
+                text TEXT NOT NULL, run_id TEXT, updated_at TEXT NOT NULL,
+                UNIQUE(task_pk, run_id, role),
+                FOREIGN KEY(task_pk) REFERENCES board_tasks(id) ON DELETE CASCADE)""")
+            connection.execute('INSERT INTO task_chat_messages SELECT id, task_pk, role, text, run_id, updated_at FROM old_chat')
+            connection.execute('DROP TABLE old_chat')
+            connection.execute('CREATE INDEX task_chat_order ON task_chat_messages(task_pk, id)')
+
 
 
 def _attachments(connection: sqlite3.Connection, task_pk: int) -> list[dict[str, Any]]:
@@ -158,6 +181,8 @@ def _serialize(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
     task = dict(row)
     task["is_error"] = bool(task["is_error"])
     task["attachments"] = _attachments(connection, task.pop("id"))
+    for private in ('active_run_id', 'remote_cwd', 'remote_identity', 'context_ready', 'init_succeeded', 'init_uncertain'):
+        task.pop(private, None)
     return task
 
 
@@ -227,7 +252,7 @@ def get_chat(task_id: str) -> dict[str, Any]:
         if task is None:
             raise TaskNotFoundError("Task not found")
         rows = connection.execute(
-            "SELECT id, role, text, updated_at FROM task_chat_messages "
+            "SELECT id, role, text, run_id, updated_at FROM task_chat_messages "
             "WHERE task_pk = ? ORDER BY id",
             (task["id"],),
         ).fetchall()
@@ -351,6 +376,8 @@ def update_task(
                 raise BoardError({"status": "Unknown status"})
             if status != row["status"] and status not in ALLOWED_TRANSITIONS.get(row["status"], set()):
                 raise BoardError({"status": f"Transition from {row['status']} to {status} is not allowed"})
+            if row["status"] == "IN PROGRESS" and status != row["status"]:
+                connection.execute("UPDATE board_tasks SET active_run_id = NULL WHERE id = ?", (row["id"],))
             order = row["sort_order"]
             if status != row["status"]:
                 order = connection.execute(
@@ -395,6 +422,8 @@ def move_task(
         source_status = row["status"]
         if not force and status != source_status and status not in ALLOWED_TRANSITIONS.get(source_status, set()):
             raise BoardError(f"Transition from {source_status} to {status} is not allowed")
+        if source_status == "IN PROGRESS" and status != source_status:
+            connection.execute("UPDATE board_tasks SET active_run_id = NULL WHERE id = ?", (row["id"],))
         destination_ids = [
             item["id"]
             for item in connection.execute(

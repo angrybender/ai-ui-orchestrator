@@ -8,7 +8,42 @@
           "id": "base_dir",
           "type": "string",
           "required": true,
-          "description": "absolute path"
+          "description": "Absolute path on the remote server where task directories are created."
+        }
+      ]
+    },
+    {
+      "title": "Init script path",
+      "fields": [
+        {
+          "id": "init_script_path",
+          "type": "string",
+          "sub_type": "big",
+          "default": "",
+          "description": "Bash script on the remote server; relative paths start in the SSH user home."
+        }
+      ]
+    },
+    {
+      "title": "Init script text",
+      "fields": [
+        {
+          "id": "init_script_text",
+          "type": "text",
+          "default": "",
+          "description": "Bash script content. Specify either a path or text; leave both empty to skip Init. Runs in the task directory (cwd)."
+        }
+      ]
+    },
+    {
+      "title": "Init timeout",
+      "fields": [
+        {
+          "id": "init_script_timeout",
+          "type": "integer",
+          "required": true,
+          "default": 300,
+          "description": "Init timeout in seconds."
         }
       ]
     }

@@ -7,6 +7,9 @@ MUST
 - after finish work - delete all tmp files/scripts what you have created
 - upgrade specifications after all fixes
 
+- Base directory (`tasks.base_dir`) задаёт каталог для создания папок задач. Init и агент всегда запускаются с cwd `<tasks.base_dir>/<TASK-ID>`; отдельный cwd для Init не настраивается.
+- Агент общается по ACP: промпт передаётся через `session/prompt` после `session/new` или `session/load`; `${PROMPT}` в команде запуска необязателен.
+
 TESTING
 
 - Перед запуском любых Python-тестов обязательно создать или обновить отдельное окружение разработки в `dev-venv`, не изменяя существующую `venv`:
@@ -31,6 +34,7 @@ directory: [specs](specs)
 - Board page: [board.md](specs/board.md)
 - Archive page: [archive.md](specs/archive.md)
 - Settings page: [settings.md](specs/settings.md)
+- Task execution and initialization: [agent.md](specs/agent.md)
 
 IGNORE DIR:
 - dev

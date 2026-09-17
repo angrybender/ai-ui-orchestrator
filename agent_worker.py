@@ -10,26 +10,34 @@ import agent_store
 import board_store
 from agent_remote import RemoteAgentError, run_remote
 from settings.config import Config
+from settings.locking import configuration_lock
+from settings import settings as settings_store
+from task_cycle import TaskCycle
+from task_init import InitError
 
 CONFIG_KEYS = (
     'remote_server.username', 'remote_server.host', 'remote_server.password',
     'remote_server.ssh_key', 'tasks.base_dir', 'agent.shell', 'agent.agent_timeout',
     'agent.prompt', 'agent.continue_session_arg',
+    'tasks.init_script_path', 'tasks.init_script_text', 'tasks.init_script_timeout',
 )
 
 
 def execute() -> int:
-    config = {}
-    config_error = False
-    try:
-        config = {key: Config.get(key) for key in CONFIG_KEYS}
-        timeout = float(config['agent.agent_timeout'])
-        if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError
-    except Exception:
-        timeout = 7200
-        config_error = True
-    run = agent_store.claim(timeout)
+    # Hold the configuration lock through the atomic claim: Save cannot split
+    # this execution's snapshot or race its reservation.
+    with configuration_lock(settings_store.USER_SETTINGS_DIR):
+        config = {}
+        config_error = False
+        try:
+            config = {key: Config.get(key) for key in CONFIG_KEYS}
+            timeout = float(config['agent.agent_timeout'])
+            if not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError
+        except Exception:
+            timeout = 7200
+            config_error = True
+        run = agent_store.claim(timeout)
     if run is None:
         return 0
     try:
@@ -37,8 +45,8 @@ def execute() -> int:
             raise RemoteAgentError('Invalid agent configuration.')
         task = board_store.get_task(run['task_id'])
         task['comment'] = run.get('comment')
-        if task['comment']:
-            task['session_id'] = run.get('session_id')
+        task['_cycle'] = TaskCycle(run, config)
+        task['session_id'] = run.get('session_id')
         attachments = []
         for attachment in task['attachments']:
             path, name, _ = board_store.attachment_path(task['task_id'], attachment['id'])
@@ -56,6 +64,9 @@ def execute() -> int:
             return 1
         agent_store.finish(run['id'], stop_reason=stop_reason)
         return 0
+    except InitError as error:
+        agent_store.finish(run['id'], str(error), init_error=True, uncertain=error.uncertain)
+        return 1
     except RemoteAgentError as error:
         agent_store.finish(run['id'], str(error), getattr(error, 'stop_reason', None))
         return 1

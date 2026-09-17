@@ -16,6 +16,7 @@ import os
 from typing import Callable
 
 import paramiko
+from task_init import InitError, run_init
 
 PROMPT = ("Выполни задачу из TASK.md. Все необходимые вложения находятся в текущем "
           "рабочем каталоге. Работай только в текущем каталоге.")
@@ -65,14 +66,14 @@ def _prepare(task, attachments, config):
     shell = config.get("agent.shell")
     base = config.get("tasks.base_dir")
     password = config.get("remote_server.password") or ""
-    key = ""
-    if not all(isinstance(v, str) for v in (host, username, shell, base, password)):
+    key = config.get("remote_server.ssh_key") or ""
+    if not all(isinstance(v, str) for v in (host, username, shell, base, password, key)):
         raise ValueError
     if not host.strip() or not username.strip() or not shell.strip():
         raise ValueError
     if any(unicodedata.category(c).startswith("C") for c in host + username + base) or "\x00" in shell:
         raise ValueError
-    if not base.startswith("/") or "\\" in base or not password:
+    if not base.startswith("/") or "\\" in base or not (key or password):
         raise ValueError
     # Bracketed IPv6 may carry a port; bare IPv6 uses the default port.
     port = 22
@@ -116,8 +117,13 @@ def _prepare(task, attachments, config):
     system_prompt = config.get("agent.prompt")
     if system_prompt:
         text = f"{system_prompt}\n\n{text}"
-    auth = {"password": password}
-    return host, port, username, auth, base, cwd, shell, timeout, names, text, (password,)
+    secrets = [password, key]
+    if key:
+        if not Path(key).is_absolute() or not Path(key).is_file():
+            raise ValueError
+        secrets.append(Path(key).read_text(encoding='utf-8'))
+    auth = {"key_filename": key} if key else {"password": password}
+    return host, port, username, auth, base, cwd, shell, timeout, names, text, tuple(secrets)
 
 
 class _Diagnostics:
@@ -285,14 +291,15 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
     worker and must be short, thread-safe operations. Logs are delivered once on
     completion (also on failure), never as unredacted streaming chunks.
     """
+    cycle = task.get('_cycle')
     raw_log = None
     try:
         raw_log = _open_raw_log(task.get("task_id", "unknown"))
         prepared = _prepare(task, attachments, config)
-    except Exception:
+    except Exception as e:
         if raw_log is not None:
             raw_log.close()
-        raise RemoteAgentError("Invalid remote agent configuration or task context.") from None
+        raise RemoteAgentError(f"Invalid remote agent configuration or task context: {e}") from None
     host, port, username, auth, base, cwd, shell, timeout, names, text, secrets = prepared
     diagnostics = _Diagnostics(secrets)
     ssh = sftp = channel = None
@@ -323,7 +330,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         if posixpath.dirname(posixpath.normpath(cwd)) != base:
             raise ValueError
         # First creation remains exclusive. Resume requires an existing real directory.
-        resume = bool(task.get("comment"))
+        resume = cycle.reuse(cwd) if cycle else bool(task.get("session_id"))
         if resume:
             if not stat.S_ISDIR(sftp.lstat(cwd).st_mode):
                 raise ValueError
@@ -335,9 +342,31 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             sftp.putfo(io.BytesIO(text.encode("utf-8")), posixpath.join(cwd, "TASK.md"))
             for local, name in names:
                 sftp.put(str(local), posixpath.join(cwd, name))
+        if cycle:
+            cycle.prepared(cwd)
+            cycle.check()
+        enabled = bool((config.get('tasks.init_script_path') or '').strip() or (config.get('tasks.init_script_text') or '').strip())
+        initialized = cycle.run.get('init_succeeded') if cycle else task.get('init_succeeded')
+        if enabled and not initialized and not task.get('session_id'):
+            if cycle:
+                cycle.phase('Init')
+            run_init(transport, sftp, cwd, config, sanitize=diagnostics.safe,
+                     active=cycle.active if cycle else lambda: True,
+                     on_pid=cycle.pid if cycle else lambda pid: None, on_log=on_log)
+            if cycle:
+                cycle.initialized()
+        if cycle:
+            cycle.phase('Agent')
         prompt = task.get("comment") or PROMPT
+        if task.get('comment') and not task.get('session_id'):
+            prompt = PROMPT + '\n\n' + task['comment']
         if not isinstance(prompt, str) or "\x00" in prompt:
             raise ValueError
+        # ACP carries the prompt via session/prompt. Keep optional substitution
+        # for existing shell templates, but plain ACP commands need no template.
+        shell = shell.replace('${PROMPT}', shlex.quote(prompt))
+        if task.get('session_id') and config.get('agent.continue_session_arg'):
+            shell += ' ' + config['agent.continue_session_arg']
         command = f"cd -- {shlex.quote(cwd)} && exec {shell}"
         # Own the channel before exec_command: it may itself block waiting for SSH acknowledgement.
         channel = transport.open_session(timeout=CONNECT_TIMEOUT)
@@ -363,6 +392,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             try:
                 stderr_thread = threading.Thread(target=stderr_reader, daemon=True)
                 stderr_thread.start()
+                if cycle:
+                    cycle.check()
                 on_started()
                 channel.exec_command(command)
                 if cancelled.is_set():
@@ -376,8 +407,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message, raw_log)
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
-                stage = "session/load" if task.get("comment") else "session/new"
-                if task.get("comment"):
+                stage = "session/load" if task.get("session_id") else "session/new"
+                if task.get("session_id"):
                     session_id = task.get("session_id")
                     if not isinstance(session_id, str) or not session_id.strip():
                         raise ACPError("session/load: missing saved session id")
@@ -422,6 +453,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             error = "Remote agent timed out."
         elif outcome.get("failed") or not outcome:
             error = diagnostics.safe(outcome.get("error") or "Remote agent execution failed.")
+    except InitError:
+        raise
     except Exception as exception:
         detail = diagnostics.safe(str(exception)).strip()
         error = detail or f"Remote agent connection failed ({type(exception).__name__})."

@@ -16,6 +16,8 @@ import board_store
 
 
 def configure(directory: Path) -> None:
+    from settings import settings as settings_store
+    settings_store.USER_SETTINGS_DIR = directory / "settings"
     board_store.DATABASE_PATH = directory / "app.db"
     board_store.FILES_DIR = directory / "files"
 
@@ -23,7 +25,7 @@ def configure(directory: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", type=Path)
-    parser.add_argument("--operation", choices=("claim", "success", "failure"))
+    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "message"))
     parser.add_argument("--run-id")
     args = parser.parse_args()
     if args.operation:
@@ -36,6 +38,16 @@ def main() -> None:
             result = agent_store.claim(300)
             if result is None:
                 raise RuntimeError("No task was claimed")
+        elif args.operation in ('init', 'agent'):
+            from task_cycle import TaskCycle
+            TaskCycle({'id': args.run_id}, {'tasks.init_script_timeout': 300, 'agent.agent_timeout': 300}).phase('Init' if args.operation == 'init' else 'Agent')
+            result = {'phase': args.operation}
+        elif args.operation == 'init-failure':
+            agent_store.finish(args.run_id, 'Init script error: <img src=x onerror=alert(1)>', init_error=True)
+            result = {'finished': args.run_id}
+        elif args.operation == 'message':
+            agent_store.message(args.run_id, 'Agent response after retry')
+            result = {'message': args.run_id}
         else:
             agent_store.finish(args.run_id, "Live test agent failure" if args.operation == "failure" else None)
             result = {"finished": args.run_id}
