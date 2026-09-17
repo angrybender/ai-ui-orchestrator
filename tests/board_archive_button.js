@@ -36,12 +36,26 @@ const path = require('node:path');
         await page.evaluate(() => document.dispatchEvent(new Event('DOMContentLoaded')));
         await page.locator('#task-modal').waitFor({ state: 'visible' });
         const button = page.locator('#archive-task');
-        assert.equal(await button.isVisible(), task.status === 'DONE', `${task.status}, standalone=${standalone}`);
-        if (task.status === 'DONE') {
+        assert.equal(await button.isVisible(), ['WAIT', 'DONE'].includes(task.status), `${task.status}, standalone=${standalone}`);
+        if (['WAIT', 'DONE'].includes(task.status)) {
           assert.equal(await button.isEnabled(), true);
+          await page.locator('#task-status').selectOption('ARCHIVE');
+          assert.equal(await button.isVisible(), true, 'Unsaved dropdown does not hide archive');
+          for (const width of [320, 721, 1280]) {
+            await page.setViewportSize({ width, height: 1000 });
+            assert.equal(await page.locator('.task-dialog').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+          }
+          if (process.env.BOARD_TEST_SCREENSHOT && task.status === 'WAIT' && !standalone) {
+            await page.screenshot({ path: process.env.BOARD_TEST_SCREENSHOT });
+          }
           if (!standalone) {
+            await page.evaluate(() => { window.openTaskId = null; });
             await button.click();
             await page.locator('#task-modal').waitFor({ state: 'hidden' });
+            assert.deepEqual(moves.pop(), { status: 'ARCHIVE', position: 0 });
+          } else {
+            await button.click();
+            await page.waitForURL('http://board.test/archive');
             assert.deepEqual(moves.pop(), { status: 'ARCHIVE', position: 0 });
           }
         } else {
@@ -54,9 +68,8 @@ const path = require('node:path');
     await page.locator('#new-task-button').click();
     await page.waitForFunction(() => document.querySelector('#task-mode').value === 'create');
     assert.equal(await page.locator('#archive-task').isVisible(), false);
-    if (process.env.BOARD_TEST_SCREENSHOT) await page.screenshot({ path: process.env.BOARD_TEST_SCREENSHOT });
     assert.deepEqual(errors, []);
-    console.log('PASS: To Archive visible only for DONE across 7 statuses in modal/standalone layouts; creation hidden; DONE archive request verified.');
+    console.log('PASS: To Archive visible only for WAIT/DONE across 7 statuses in modal/standalone layouts; creation hidden; WAIT/DONE archive requests verified.');
   } finally {
     await browser.close();
   }

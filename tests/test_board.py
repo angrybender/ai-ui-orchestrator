@@ -8,6 +8,24 @@ import board_store
 import main
 
 
+@pytest.mark.parametrize("status", board_store.STATUSES)
+def test_archive_transition_from_board_statuses(status):
+    with TestClient(main.app) as client:
+        board_store.create_task("PRJ-ARCHIVE", "Archive task", "Details", [])
+        with board_store.connect() as connection:
+            connection.execute("UPDATE board_tasks SET status = ? WHERE task_id = ?", (status, "PRJ-ARCHIVE"))
+        response = client.patch("/api/board/tasks/PRJ-ARCHIVE/move", json={"status": "ARCHIVE", "position": 0})
+        if status in ("BACKLOG", "WAIT", "DONE"):
+            assert response.status_code == 200
+            assert response.json()["tasks"] == []
+            archived = client.get("/api/archive/tasks").json()["tasks"]
+            assert [task["task_id"] for task in archived] == ["PRJ-ARCHIVE"]
+            assert archived[0]["status"] == "ARCHIVE"
+        else:
+            assert response.status_code == 422
+            assert board_store.get_task("PRJ-ARCHIVE")["status"] == status
+
+
 def test_multipart_creation_works_after_database_migration(tmp_path, monkeypatch):
     database = tmp_path / "board.db"
     files = tmp_path / "files"

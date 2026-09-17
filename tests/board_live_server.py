@@ -25,7 +25,7 @@ def configure(directory: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", type=Path)
-    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "message"))
+    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "message", "context-conflict"))
     parser.add_argument("--run-id")
     args = parser.parse_args()
     if args.operation:
@@ -48,6 +48,9 @@ def main() -> None:
         elif args.operation == 'message':
             agent_store.message(args.run_id, 'Agent response after retry')
             result = {'message': args.run_id}
+        elif args.operation == 'context-conflict':
+            agent_store.finish(args.run_id, 'Task directory requirements-INIT-1 already exists.')
+            result = {'finished': args.run_id}
         else:
             agent_store.finish(args.run_id, "Live test agent failure" if args.operation == "failure" else None)
             result = {"finished": args.run_id}

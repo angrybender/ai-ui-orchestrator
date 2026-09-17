@@ -44,6 +44,8 @@
 .task-title { display:-webkit-box; overflow:hidden; margin:0; color:#282735; font-size:14px; line-height:1.35; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .task-extra-status { display:flex; align-items:center; gap:7px; margin-top:18px; color:#575564; font-size:11px; }
 .task-extra-status span { width:13px; height:13px; border:2px solid #474550; border-radius:50%; }
+.task-extra-status[data-phase="Init"] span { background:#f4e96f; }
+.task-extra-status[data-phase="Agent"] span { background:#4389e7; }
 .modal-backdrop { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:#24223880; }
 .task-page-editor { max-width:760px; }
 .task-page-editor .task-dialog { width:100%; box-shadow:none; }

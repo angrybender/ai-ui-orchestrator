@@ -8,7 +8,6 @@ from pathlib import Path
 import posixpath
 import re
 import shlex
-import stat
 import threading
 import time
 import unicodedata
@@ -17,9 +16,8 @@ from typing import Callable
 
 import paramiko
 from task_init import InitError, run_init
+from task_context import prepare_directory, task_prompt
 
-PROMPT = ("Выполни задачу из TASK.md. Все необходимые вложения находятся в текущем "
-          "рабочем каталоге. Работай только в текущем каталоге.")
 CONNECT_TIMEOUT = 20
 STDERR_JOIN_TIMEOUT = 0.2
 
@@ -329,19 +327,12 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         cwd = posixpath.join(base, task["task_id"])
         if posixpath.dirname(posixpath.normpath(cwd)) != base:
             raise ValueError
-        # First creation remains exclusive. Resume requires an existing real directory.
         resume = cycle.reuse(cwd) if cycle else bool(task.get("session_id"))
-        if resume:
-            if not stat.S_ISDIR(sftp.lstat(cwd).st_mode):
-                raise ValueError
-        else:
-            sftp.mkdir(cwd)
-        if posixpath.normpath(sftp.normalize(cwd)) != cwd:
-            raise ValueError
+        context_dir = prepare_directory(sftp, cwd, task['task_id'], resume)
         if not resume:
-            sftp.putfo(io.BytesIO(text.encode("utf-8")), posixpath.join(cwd, "TASK.md"))
+            sftp.putfo(io.BytesIO(text.encode("utf-8")), posixpath.join(context_dir, "TASK.md"))
             for local, name in names:
-                sftp.put(str(local), posixpath.join(cwd, name))
+                sftp.put(str(local), posixpath.join(context_dir, name))
         if cycle:
             cycle.prepared(cwd)
             cycle.check()
@@ -357,9 +348,9 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 cycle.initialized()
         if cycle:
             cycle.phase('Agent')
-        prompt = task.get("comment") or PROMPT
+        prompt = task.get("comment") or task_prompt(task['task_id'])
         if task.get('comment') and not task.get('session_id'):
-            prompt = PROMPT + '\n\n' + task['comment']
+            prompt = task_prompt(task['task_id']) + '\n\n' + task['comment']
         if not isinstance(prompt, str) or "\x00" in prompt:
             raise ValueError
         # ACP carries the prompt via session/prompt. Keep optional substitution

@@ -2,7 +2,7 @@
   "use strict";
 
   const statuses = ["BACKLOG", "OPEN", "WAIT", "IN PROGRESS", "REVIEW", "DONE"];
-  const transitions = { "BACKLOG": ["OPEN", "ARCHIVE"], "IN PROGRESS": ["BACKLOG"], "REVIEW": ["OPEN", "BACKLOG", "DONE"], "DONE": ["ARCHIVE"] };
+  const transitions = { "BACKLOG": ["OPEN", "ARCHIVE"], "WAIT": ["ARCHIVE"], "IN PROGRESS": ["BACKLOG"], "REVIEW": ["OPEN", "BACKLOG", "DONE"], "DONE": ["ARCHIVE"] };
   let tasks = [];
   let editing = null;
   let removedAttachments = [];
@@ -78,6 +78,7 @@
         if (task.status === "IN PROGRESS") {
           const extra = document.createElement("div");
           extra.className = "task-extra-status";
+          if (["Init", "Agent"].includes(task.phase)) extra.dataset.phase = task.phase;
           extra.append(document.createElement("span"), document.createTextNode(
             ["Init", "Agent"].includes(task.phase) ? task.phase : "In progress"));
           card.append(extra);
@@ -182,7 +183,7 @@
       $("#file-upload-list")?.remove();
     }
     const archiveButton = $("#archive-task");
-    if (archiveButton) archiveButton.hidden = !task || task.status !== "DONE";
+    if (archiveButton) archiveButton.hidden = !task || !["WAIT", "DONE"].includes(task.status);
     ["#reopen-task", "#done-task"].forEach((selector) => {
       const button = $(selector);
       if (button) button.hidden = !task || task.status !== "REVIEW";
@@ -206,7 +207,7 @@
       });
       ["#reopen-task", "#done-task"].forEach((selector) => { const button = $(selector); if (button) button.hidden = nextStatus !== "REVIEW"; });
       if (deleteButton) deleteButton.hidden = !["BACKLOG", "ARCHIVE"].includes(nextStatus);
-      if (archiveButton) archiveButton.hidden = nextStatus !== "DONE";
+      if (archiveButton) archiveButton.hidden = !["WAIT", "DONE"].includes(nextStatus);
     }, () => { render(); });
     title.focus();
   }
@@ -265,7 +266,7 @@
   }
 
   async function archiveTask() {
-    if (!editing || editing.status !== "DONE") return;
+    if (!editing || !["WAIT", "DONE"].includes(editing.status)) return;
     const button = $("#archive-task");
     if (button.disabled) return;
     if (window.spinner && !window.spinner.start(button)) return;

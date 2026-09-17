@@ -129,9 +129,11 @@ def test_zero_exit_without_handshake_reports_startup_failure(tmp_path, monkeypat
 def test_real_bash_variants_context_and_literal_path(tmp_path, variant):
     cwd = tmp_path / 'task'
     cwd.mkdir()
-    (cwd / 'TASK.md').write_text('context')
-    (cwd / 'attachment').write_text('file')
-    script = 'test "$(cat TASK.md)" = context || exit 9\ntest -f attachment || exit 8\nprintf "готово" > result\nprintf warning >&2\n'
+    requirements = cwd / 'requirements-PRJ-12'
+    requirements.mkdir()
+    (requirements / 'TASK.md').write_text('context')
+    (requirements / 'attachment').write_text('file')
+    script = 'test "$(cat requirements-PRJ-12/TASK.md)" = context || exit 9\ntest -f requirements-PRJ-12/attachment || exit 8\nprintf "готово" > result\nprintf warning >&2\n'
     path = tmp_path / "init $(touch INJECTED); script.sh"
     path.write_text(script)
     config = {'tasks.init_script_text': script if variant == 'text' else '',
@@ -241,7 +243,6 @@ def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monke
     ssh, config, task, _, _, _ = setup
     config.update({'tasks.init_script_text': 'exit 2', 'tasks.init_script_timeout': 300, 'agent.continue_session_arg': '--continue'})
     monkeypatch.setattr(Config, 'get', staticmethod(config.get))
-    ssh.sftp.lstat = lambda _: SimpleNamespace(st_mode=stat.S_IFDIR | 0o700)
     board_store.init_database()
     agent_store.init_database()
     board_store.create_task(task['task_id'], task['title'], task['description'], [])
@@ -249,7 +250,7 @@ def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monke
     calls = []
     def init(transport, sftp, cwd, snapshot, **kwargs):
         calls.append(snapshot['tasks.init_script_text'])
-        assert sftp.files[cwd + '/TASK.md']
+        assert sftp.files[cwd + '/requirements-PRJ-12/TASK.md']
         assert board_store.get_task(task['task_id'])['phase'] == 'Init'
         assert agent_store.claim(60) is None
         if len(calls) == 1:
@@ -258,12 +259,14 @@ def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monke
     assert agent_worker.execute() == 1
     assert ssh.channel.command is None
     initial = board_store.get_chat(task['task_id'])
+    original_files = dict(ssh.sftp.files)
     assert initial['status'] == 'WAIT'
     assert initial['messages'][0]['role'] == 'system'
     assert initial['messages'][0]['run_id']
     config['tasks.init_script_text'] = 'echo fixed'
     board_store.add_user_comment(task['task_id'], 'Please retry')
     assert agent_worker.execute() == 0
+    assert ssh.sftp.files == original_files
     requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert requests[1]['method'] == 'session/new'
     assert 'TASK.md' in requests[2]['params']['prompt'][0]['text']
@@ -336,7 +339,6 @@ def test_init_success_survives_agent_failure(setup, monkeypatch):
     ssh, config, task, _, _, _ = setup
     config['tasks.init_script_text'] = 'echo ok'
     monkeypatch.setattr(Config, 'get', staticmethod(config.get))
-    ssh.sftp.lstat = lambda _: SimpleNamespace(st_mode=stat.S_IFDIR | 0o700)
     board_store.init_database()
     agent_store.init_database()
     board_store.create_task(task['task_id'], task['title'], task['description'], [])
@@ -352,7 +354,8 @@ def test_init_success_survives_agent_failure(setup, monkeypatch):
     assert all(x['role'] != 'system' for x in board_store.get_chat(task['task_id'])['messages'])
 
 
-def test_unknown_existing_directory_stays_rejected(setup, monkeypatch):
+@pytest.mark.parametrize('requirements_exist', [False, True])
+def test_unknown_existing_directory_stays_rejected(setup, monkeypatch, requirements_exist):
     ssh, config, task, _, _, _ = setup
     config['tasks.init_script_text'] = 'echo ok'
     monkeypatch.setattr(Config, 'get', staticmethod(config.get))
@@ -361,8 +364,15 @@ def test_unknown_existing_directory_stays_rejected(setup, monkeypatch):
     board_store.create_task(task['task_id'], task['title'], task['description'], [])
     board_store.move_task(task['task_id'], 'OPEN', 0)
     ssh.sftp.dirs.add('/tasks/PRJ-12')
+    name = 'requirements-PRJ-12' if requirements_exist else 'PRJ-12'
+    if requirements_exist:
+        ssh.sftp.dirs.add('/tasks/PRJ-12/requirements-PRJ-12')
     monkeypatch.setattr(agent_remote, 'run_init', lambda *a, **kw: pytest.fail('Unknown context reused'))
     assert agent_worker.execute() == 1
+    chat = board_store.get_chat(task['task_id'])
+    assert chat['status'] == 'WAIT'
+    assert chat['messages'][0]['text'] == f'Task directory {name} already exists.'
+    assert board_store.get_task(task['task_id'])['is_error']
     board_store.add_user_comment(task['task_id'], 'Retry')
     assert agent_worker.execute() == 1
     assert ssh.channel.command is None
@@ -389,7 +399,7 @@ def test_base_directory_contains_task_but_is_not_init_cwd(setup, monkeypatch):
     config['tasks.init_script_text'] = 'pwd'
     init_cwds = []
     def init(transport, sftp, cwd, config, **callbacks):
-        assert cwd + '/TASK.md' in sftp.files
+        assert cwd + '/requirements-PRJ-12/TASK.md' in sftp.files
         init_cwds.append(cwd)
     monkeypatch.setattr(agent_remote, 'run_init', init)
     run()

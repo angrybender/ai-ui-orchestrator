@@ -197,11 +197,11 @@ def _concurrent_worker(database, files, barrier, release, sessions, results, out
                 raise OSError(2, "missing")
 
             def mkdir(self, path):
-                assert path == "/remote/tasks/PRJ-9"
+                assert path in {"/remote/tasks/PRJ-9", "/remote/tasks/PRJ-9/requirements-PRJ-9"}
 
             def putfo(self, stream, path):
                 assert isinstance(stream, io.BytesIO)
-                assert path == "/remote/tasks/PRJ-9/TASK.md"
+                assert path == "/remote/tasks/PRJ-9/requirements-PRJ-9/TASK.md"
                 assert stream.read().decode().startswith(
                     CONFIG["agent.prompt"] + "\n\n# PRJ-9 — Полное название\n\n")
 

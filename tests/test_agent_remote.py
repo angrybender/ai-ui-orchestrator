@@ -183,10 +183,13 @@ def test_success_context_auth_and_protocol(setup, tmp_path, system_prompt):
     assert result == {"sessionId": "session-1", "stopReason": "end_turn"}
     assert sessions == ["session-1"]
     prefix = f"{system_prompt}\n\n" if system_prompt else ""
-    assert ssh.sftp.files["/tasks/PRJ-12/TASK.md"].decode() == prefix + (
+    assert ssh.sftp.files["/tasks/PRJ-12/requirements-PRJ-12/TASK.md"].decode() == prefix + (
         "# PRJ-12 — Full title\n\nFull description\n$(do not execute)\n\n## Вложения\n\n"
         "- one.txt\n- one-2.txt\n- one-2-2.txt\n")
     assert len(ssh.sftp.files) == 4
+    assert set(ssh.sftp.files) == {
+        '/tasks/PRJ-12/requirements-PRJ-12/' + name
+        for name in ('TASK.md', 'one.txt', 'one-2.txt', 'one-2-2.txt')}
     assert ssh.events.index("started") + 1 == ssh.events.index("exec")
     assert ssh.events.index("channel-close") < ssh.events.index("ssh-close")
     assert ssh.sftp.closed
@@ -195,13 +198,13 @@ def test_success_context_auth_and_protocol(setup, tmp_path, system_prompt):
     assert ssh.connect_args["allow_agent"] is False and ssh.connect_args["look_for_keys"] is False
     command = ssh.channel.command
     import shlex
-    assert command == "cd -- /tasks/PRJ-12 && exec agent --acp -p " + shlex.quote(remote.PROMPT)
+    assert command == "cd -- /tasks/PRJ-12 && exec agent --acp -p " + shlex.quote(remote.task_prompt(task["task_id"]))
     assert task["description"] not in command
     requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert [r["method"] for r in requests] == ["initialize", "session/new", "session/prompt"]
     assert requests[0]["params"]["clientInfo"]["name"] == "task-orchestrator"
     assert requests[1]["params"] == {"cwd": "/tasks/PRJ-12", "mcpServers": []}
-    assert requests[2]["params"]["prompt"][0]["text"] == remote.PROMPT
+    assert requests[2]["params"]["prompt"][0]["text"] == remote.task_prompt(task["task_id"])
 
 
 @pytest.mark.parametrize("resume", [False, True])
@@ -211,7 +214,7 @@ def test_acp_shell_without_prompt_placeholder(setup, resume):
     if resume:
         task["session_id"] = "saved-session"
         task["comment"] = "Continue; $(do not execute) 'quoted'"
-        ssh.sftp.dirs.add("/tasks/PRJ-12")
+        ssh.sftp.dirs.update({"/tasks/PRJ-12", "/tasks/PRJ-12/requirements-PRJ-12"})
         ssh.channel.messages[1] = reply(2, {})
 
     result = run()
@@ -223,7 +226,7 @@ def test_acp_shell_without_prompt_placeholder(setup, resume):
         "initialize", "session/load" if resume else "session/new", "session/prompt"]
     assert requests[2]["params"] == {
         "sessionId": "saved-session" if resume else "session-1",
-        "prompt": [{"type": "text", "text": task["comment"] if resume else remote.PROMPT}],
+        "prompt": [{"type": "text", "text": task["comment"] if resume else remote.task_prompt(task["task_id"])}],
     }
     assert sessions == ["saved-session" if resume else "session-1"]
 
@@ -262,8 +265,8 @@ def test_invalid_attachment_before_connect(setup, tmp_path, name):
 def test_preparation_failure_never_executes(setup, failure):
     ssh, _, _, _, _, run = setup
     if failure == "existing":
-        ssh.sftp.dirs.add("/tasks/PRJ-12")
-        ssh.sftp.files["/tasks/PRJ-12/TASK.md"] = b"preserved"
+        ssh.sftp.dirs.update({"/tasks/PRJ-12", "/tasks/PRJ-12/requirements-PRJ-12"})
+        ssh.sftp.files["/tasks/PRJ-12/requirements-PRJ-12/TASK.md"] = b"preserved"
     elif failure == "upload":
         ssh.sftp.fail_upload = True
     else:
@@ -274,7 +277,46 @@ def test_preparation_failure_never_executes(setup, failure):
     assert "exec" not in ssh.events
     assert ssh.sftp.closed
     if failure == "existing":
-        assert ssh.sftp.files["/tasks/PRJ-12/TASK.md"] == b"preserved"
+        assert ssh.sftp.files["/tasks/PRJ-12/requirements-PRJ-12/TASK.md"] == b"preserved"
+        assert str(error.value) == 'Task directory requirements-PRJ-12 already exists.'
+
+
+@pytest.mark.parametrize('reuse', [False, True])
+@pytest.mark.parametrize('unsafe', ['symlink', 'escape'])
+def test_unsafe_requirements_directory_never_starts(setup, monkeypatch, reuse, unsafe):
+    import stat
+    from types import SimpleNamespace
+    ssh, _, task, _, _, run = setup
+    directory = '/tasks/PRJ-12/requirements-PRJ-12'
+    if reuse:
+        task['session_id'] = 'saved-session'
+        ssh.sftp.dirs.update({'/tasks/PRJ-12', directory})
+    if unsafe == 'symlink':
+        original = ssh.sftp.lstat
+        monkeypatch.setattr(ssh.sftp, 'lstat', lambda path: SimpleNamespace(st_mode=stat.S_IFLNK)
+                            if path == directory else original(path))
+        if not reuse:
+            ssh.sftp.dirs.add(directory)  # mkdir collides with a pre-existing symlink.
+    else:
+        monkeypatch.setattr(ssh.sftp, 'normalize', lambda path: '/outside' if path == directory else path)
+    with pytest.raises(remote.RemoteAgentError):
+        run()
+    assert not ssh.sftp.files
+    assert ssh.channel.command is None
+
+
+def test_partial_context_cannot_be_overwritten_on_retry(setup, tmp_path, monkeypatch):
+    ssh, _, _, _, _, run = setup
+    local = tmp_path / 'file'
+    local.write_text('attachment')
+    monkeypatch.setattr(ssh.sftp, 'put', lambda *args: (_ for _ in ()).throw(OSError('upload failed')))
+    with pytest.raises(remote.RemoteAgentError, match='upload failed'):
+        run([(local, 'file.txt')])
+    saved = dict(ssh.sftp.files)
+    with pytest.raises(remote.RemoteAgentError, match='Task directory requirements-PRJ-12 already exists.'):
+        run([(local, 'file.txt')])
+    assert ssh.sftp.files == saved
+    assert ssh.channel.command is None
 
 
 @pytest.mark.parametrize("bad", [b"not-json\n", b"\xff\n", b"\n", b'{}', [],
@@ -374,7 +416,7 @@ def test_empty_attachments_and_default_port(setup):
     config["remote_server.host"] = "host"
     run()
     assert ssh.connect_args["port"] == 22
-    assert "Нет вложений." in ssh.sftp.files["/tasks/PRJ-12/TASK.md"].decode()
+    assert "Нет вложений." in ssh.sftp.files["/tasks/PRJ-12/requirements-PRJ-12/TASK.md"].decode()
 
 
 def test_exec_timeout_preserves_redacted_stderr(setup):
@@ -410,7 +452,7 @@ def test_attachment_upload_failure_does_not_start(setup, tmp_path, monkeypatch):
     with pytest.raises(remote.RemoteAgentError):
         run([(local, "file.txt")])
     assert ssh.channel.command is None
-    assert "/tasks/PRJ-12/TASK.md" in ssh.sftp.files
+    assert "/tasks/PRJ-12/requirements-PRJ-12/TASK.md" in ssh.sftp.files
 
 
 @pytest.mark.parametrize("stderr", [b"", b"Internal error: Connection error.\n"])
