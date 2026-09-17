@@ -26,7 +26,13 @@ class Buffer(io.BytesIO):
 class FakeChannel:
     def __init__(self, owner):
         self.owner = owner
-        self.stdin = Buffer()
+        class Input(Buffer):
+            def write(inner, data):
+                if data == b'GO\n':
+                    owner.events.append('gate-open')
+                    return len(data)
+                return super().write(data)
+        self.stdin = Input()
         self.closed = threading.Event()
         self.block_exec = False
         self.block_stdout = False
@@ -54,14 +60,14 @@ class FakeChannel:
             channel = self
 
             class Blocked:
-                def readline(self):
+                def readline(self, size=-1):
                     channel.closed.wait(2)
                     return b""
 
                 def close(self):
                     pass
             return Blocked()
-        return Buffer(b"".join(m if isinstance(m, bytes) else (json.dumps(m) + "\n").encode() for m in self.messages))
+        return Buffer(b'ACP_PID:12345\n' + b"".join(m if isinstance(m, bytes) else (json.dumps(m) + "\n").encode() for m in self.messages))
 
     def recv_stderr(self, size):
         if self.stderr_chunks:
@@ -146,7 +152,26 @@ class FakeSSH:
 
     def open_session(self, timeout):
         assert timeout > 0
+        if self.channel.command is not None and not self.channel.closed.is_set():
+            owner = self
+            class Control:
+                def settimeout(self, timeout):
+                    pass
+                def exec_command(self, command):
+                    assert 'kill -TERM -- -12345' in command
+                    owner.events.append('stop-group')
+                def exit_status_ready(self):
+                    return True
+                def recv_exit_status(self):
+                    return 0
+                def close(self):
+                    owner.events.append('control-close')
+            return Control()
+        self.channel.closed.clear()
         return self.channel
+
+    def is_active(self):
+        return True
 
     def open_sftp(self):
         return self.sftp
@@ -198,7 +223,10 @@ def test_success_context_auth_and_protocol(setup, tmp_path, system_prompt):
     assert ssh.connect_args["allow_agent"] is False and ssh.connect_args["look_for_keys"] is False
     command = ssh.channel.command
     import shlex
-    assert command == "cd -- /tasks/PRJ-12 && exec agent --acp -p " + shlex.quote(remote.task_prompt(task["task_id"]))
+    supervisor = shlex.split(command.split('bash -c ', 1)[1])[0]
+    assert supervisor.endswith("exec agent --acp -p " + shlex.quote(remote.task_prompt(task["task_id"])))
+    assert 'setsid --wait' in command
+    assert ssh.events.index('stop-group') < ssh.events.index('channel-close')
     assert task["description"] not in command
     requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert [r["method"] for r in requests] == ["initialize", "session/new", "session/prompt"]
@@ -220,7 +248,8 @@ def test_acp_shell_without_prompt_placeholder(setup, resume):
     result = run()
 
     assert result["stopReason"] == "end_turn"
-    assert ssh.channel.command == "cd -- /tasks/PRJ-12 && exec " + config["agent.shell"]
+    import shlex
+    assert shlex.split(ssh.channel.command.split('bash -c ', 1)[1])[0].endswith('exec ' + config['agent.shell'])
     requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert [r["method"] for r in requests] == [
         "initialize", "session/load" if resume else "session/new", "session/prompt"]

@@ -68,7 +68,8 @@ def execute() -> int:
         agent_store.finish(run['id'], str(error), init_error=True, uncertain=error.uncertain)
         return 1
     except RemoteAgentError as error:
-        agent_store.finish(run['id'], str(error), getattr(error, 'stop_reason', None))
+        agent_store.finish(run['id'], str(error), getattr(error, 'stop_reason', None),
+                           agent_uncertain=error.uncertain)
         return 1
     except BaseException:
         agent_store.finish(run['id'], 'Agent executor failed.')

@@ -120,13 +120,17 @@ def _concurrent_worker(database, files, barrier, release, sessions, results, out
                 return self
 
             def write(self, data):
+                if data == b'GO\n':
+                    return
                 self.request = json.loads(data)
 
             def flush(self):
                 pass
 
-            def readline(self):
+            def readline(self, size=-1):
                 request = self.request
+                if request is None:
+                    return b'ACP_PID:12345\n'
                 method = request["method"]
                 if method == "initialize":
                     assert request["params"]["protocolVersion"] == 1
@@ -165,6 +169,7 @@ def _concurrent_worker(database, files, barrier, release, sessions, results, out
         channel = Channel()
 
         class SSH:
+            opened = False
             def load_system_host_keys(self):
                 pass
 
@@ -184,6 +189,20 @@ def _concurrent_worker(database, files, barrier, release, sessions, results, out
                 assert seconds > 0
 
             def open_session(self, **kwargs):
+                if self.opened:
+                    class Control:
+                        def settimeout(self, timeout):
+                            pass
+                        def exec_command(self, command):
+                            assert 'kill -TERM -- -12345' in command
+                        def exit_status_ready(self):
+                            return True
+                        def recv_exit_status(self):
+                            return 0
+                        def close(self):
+                            pass
+                    return Control()
+                self.opened = True
                 return channel
 
             def open_sftp(self):

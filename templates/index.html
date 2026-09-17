@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Board · Orchestrator{% endblock %}
 {% block content %}
-<section class="page-heading board-heading"><div></div><button class="button primary" id="new-task-button" type="button">New task <span>＋</span></button></section>
+<section class="page-heading board-heading"><div class="board-actions"><button class="button" id="agent-recovery-button" type="button">Agent Recovery</button><button class="button primary" id="new-task-button" type="button">New task <span>＋</span></button></div></section>
 <section class="board" id="board" aria-label="Kanban board">
   {% for status in ["BACKLOG", "OPEN", "WAIT", "IN PROGRESS", "REVIEW", "DONE"] %}
   <section class="board-column" data-status="{{ status }}" aria-labelledby="column-{{ loop.index }}">
@@ -26,4 +26,4 @@
   </div>
 </div>
 {% endblock %}
-{% block page_scripts %}<link rel="stylesheet" href="{{ url_for('static', path='css/board.css') }}"><script src="{{ url_for('static', path='js/marked.umd.js') }}"></script><script src="{{ url_for('static', path='js/board-live.js') }}"></script><script src="{{ url_for('static', path='js/task-chat.js') }}"></script><script src="{{ url_for('static', path='js/board.js') }}"></script>{% endblock %}
+{% block page_scripts %}<link rel="stylesheet" href="{{ url_for('static', path='css/board.css') }}"><script src="{{ url_for('static', path='js/marked.umd.js') }}"></script><script src="{{ url_for('static', path='js/board-live.js') }}"></script><script src="{{ url_for('static', path='js/task-chat.js') }}"></script><script src="{{ url_for('static', path='js/board.js') }}"></script><script src="{{ url_for('static', path='js/agent-recovery.js') }}"></script>{% endblock %}

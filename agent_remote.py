@@ -17,6 +17,7 @@ from typing import Callable
 import paramiko
 from task_init import InitError, run_init
 from task_context import prepare_directory, task_prompt
+from agent_control import AgentControl, CANCEL_TIMEOUT, POLL_INTERVAL
 
 CONNECT_TIMEOUT = 20
 STDERR_JOIN_TIMEOUT = 0.2
@@ -38,9 +39,10 @@ def _raw_log(handle, direction: bytes, payload: bytes) -> None:
 class RemoteAgentError(RuntimeError):
     """Only fixed, safe messages cross the transport boundary."""
 
-    def __init__(self, message: str, stop_reason: str | None = None):
+    def __init__(self, message: str, stop_reason: str | None = None, *, uncertain=False):
         super().__init__(message)
         self.stop_reason = stop_reason
+        self.uncertain = uncertain
 
 
 class ACPError(RuntimeError):
@@ -216,8 +218,10 @@ def _unique_object(pairs):
     return result
 
 
-def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, on_message=None, raw_log=None):
+def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, on_message=None, raw_log=None, sender=None):
     def send(message):
+        if sender is not None:
+            return sender(message)
         if cancelled.is_set():
             raise ValueError
         payload = json.dumps(message, ensure_ascii=False).encode("utf-8") + b"\n"
@@ -308,6 +312,10 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
     outcome = {}
     error = None
     streams = []
+    control = None
+    cancel_thread = None
+    user_cancelled = False
+    uncertain = False
     try:
         ssh = paramiko.SSHClient()
         ssh.load_system_host_keys()
@@ -358,7 +366,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         shell = shell.replace('${PROMPT}', shlex.quote(prompt))
         if task.get('session_id') and config.get('agent.continue_session_arg'):
             shell += ' ' + config['agent.continue_session_arg']
-        command = f"cd -- {shlex.quote(cwd)} && exec {shell}"
+        control = AgentControl(transport, cancelled, lambda payload: _raw_log(raw_log, b'OUT ', payload), cycle)
+        command = control.command(cwd, shell)
         # Own the channel before exec_command: it may itself block waiting for SSH acknowledgement.
         channel = transport.open_session(timeout=CONNECT_TIMEOUT)
 
@@ -392,10 +401,13 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 stdin = channel.makefile_stdin("wb")
                 stdout = channel.makefile("rb")
                 streams.extend((stdin, stdout))
+                stage = "remote process handshake"
+                if not control.handshake(stdin, stdout):
+                    return
                 stage = "initialize"
                 initialized = _request(stdin, stdout, 1, "initialize", {
                     "protocolVersion": 1, "clientCapabilities": {},
-                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message, raw_log)
+                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message, raw_log, control.send)
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
                 stage = "session/load" if task.get("session_id") else "session/new"
@@ -404,9 +416,9 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     if not isinstance(session_id, str) or not session_id.strip():
                         raise ACPError("session/load: missing saved session id")
                     session = _request(stdin, stdout, 2, "session/load", {
-                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log)
+                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
                 else:
-                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log)
+                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
                     session_id = session.get("sessionId")
                     if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
                         raise ValueError("Missing, invalid or unsafe sessionId")
@@ -416,8 +428,11 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 on_session(session_id)
                 stage = "session/prompt"
                 result = _request(stdin, stdout, 3, "session/prompt", {
-                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message, raw_log)
+                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message, raw_log, control.send)
                 reason = result.get("stopReason")
+                if reason == 'cancelled' and control.requested.is_set():
+                    outcome.update(sessionId=session_id, stopReason=reason)
+                    return
                 if reason not in ("end_turn", "max_tokens", "max_turn_requests", "refusal"):
                     if reason in ("cancelled", "canceled", "error", "failed"):
                         outcome["stop_reason"] = reason
@@ -440,9 +455,36 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         worker = threading.Thread(target=execute, daemon=True)
         started = time.monotonic()
         worker.start()
-        if not finished.wait(max(0, timeout - (time.monotonic() - started))):
-            error = "Remote agent timed out."
-        elif outcome.get("failed") or not outcome:
+        cancel_deadline = None
+        while True:
+            if cycle and not user_cancelled and not cycle.active():
+                user_cancelled = True
+                control.requested.set()
+                cancel_deadline = time.monotonic() + CANCEL_TIMEOUT
+                cycle.cancelling()
+
+                def cancel_session():
+                    try:
+                        control.request_cancel()
+                    except Exception:
+                        diagnostics.append('exception', 'Unable to send ACP session/cancel.')
+
+                cancel_thread = threading.Thread(target=cancel_session, daemon=True)
+                cancel_thread.start()
+            if finished.is_set():
+                break
+            if user_cancelled:
+                if (control.cancel_sent.is_set() and not control.prompt_sent) or time.monotonic() >= cancel_deadline:
+                    break
+            elif time.monotonic() - started >= timeout:
+                error = "Remote agent timed out."
+                break
+            deadline = cancel_deadline if user_cancelled else started + timeout
+            finished.wait(min(POLL_INTERVAL, max(0, deadline - time.monotonic())))
+        if user_cancelled:
+            error = 'Remote agent cancelled.'
+            outcome['stop_reason'] = 'cancelled'
+        elif not error and (outcome.get("failed") or not outcome):
             error = diagnostics.safe(outcome.get("error") or "Remote agent execution failed.")
     except InitError:
         raise
@@ -452,6 +494,13 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         diagnostics.append("stderr", f"{type(exception).__name__}: {error}")
     finally:
         cancelled.set()
+        if control is not None:
+            try:
+                uncertain = not control.stop()
+            except Exception:
+                uncertain = True
+            if uncertain:
+                error = (error or 'Remote agent cleanup failed.') + '\nRemote stop unconfirmed; retry blocked pending verification.'
         _close(channel)
         if stderr_thread is not None:
             stderr_thread.join(STDERR_JOIN_TIMEOUT)
@@ -459,6 +508,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         _close(sftp)
         if worker is not None and worker.is_alive():
             worker.join(STDERR_JOIN_TIMEOUT)
+        if cancel_thread is not None:
+            cancel_thread.join(STDERR_JOIN_TIMEOUT)
         for stream in streams:
             _close(stream)
         if raw_log is not None:
@@ -472,5 +523,6 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             except Exception:
                 error = "Remote agent log persistence failed."
     if error:
-        raise RemoteAgentError(error, stop_reason=outcome.get("stop_reason")) from None
+        reason = 'cancelled' if user_cancelled else outcome.get('stop_reason')
+        raise RemoteAgentError(error, stop_reason=reason, uncertain=uncertain) from None
     return {"sessionId": outcome["sessionId"], "stopReason": outcome["stopReason"]}

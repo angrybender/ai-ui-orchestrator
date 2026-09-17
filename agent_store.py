@@ -1,14 +1,41 @@
 from __future__ import annotations
 
 import os
+import logging
 import signal
 import time
 from pathlib import Path
 from uuid import uuid4
 
 import board_store
+from agent_control import CANCEL_TIMEOUT, STOP_GRACE
+from process_scope import executor_scope
 
 ACTIVE = "state IN ('PREPARING', 'RUNNING')"
+logger = logging.getLogger(__name__)
+
+
+def confirm_remote_stop(run_id: str) -> None:
+    """Operator attestation AFTER checking the remote process is gone.
+
+    This deliberately does not infer termination from DONE, elapsed time, or
+    the executor's death. Never call it automatically from claim/recover.
+    """
+    with board_store.connect() as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        row = connection.execute('SELECT * FROM agent_runs WHERE id = ?', (run_id,)).fetchone()
+        if row is None:
+            raise ValueError('Unknown agent run.')
+        if row['state'] in ('PREPARING', 'RUNNING'):
+            raise ValueError('Cannot confirm an active agent run.')
+        if not row['agent_uncertain']:
+            raise ValueError('This run has no unconfirmed agent stop.')
+        connection.execute('UPDATE agent_runs SET agent_uncertain = 0, agent_stop_confirmed = 1, '
+                           "log = log || ? WHERE id = ?",
+                           ('\nRemote stop verified by operator; queue block cleared.\n', run_id))
+        connection.execute('UPDATE board_tasks SET agent_uncertain = 0 WHERE id = ? AND NOT EXISTS '
+                           '(SELECT 1 FROM agent_runs WHERE task_pk = ? AND agent_uncertain = 1)',
+                           (row['task_pk'], row['task_pk']))
 
 
 def init_database() -> None:
@@ -39,6 +66,10 @@ def init_database() -> None:
         migrate_ownership = 'phase' not in columns
         for name, definition in {'phase': "TEXT NOT NULL DEFAULT 'In progress'",
                                  'init_pid': 'INTEGER', 'init_result': 'TEXT',
+                                 'agent_pid': 'INTEGER', 'cancel_requested_at': 'REAL',
+                                 'executor_scope': 'TEXT',
+                                 'agent_stop_confirmed': 'INTEGER NOT NULL DEFAULT 0',
+                                 'agent_uncertain': 'INTEGER NOT NULL DEFAULT 0',
                                  'init_uncertain': 'INTEGER NOT NULL DEFAULT 0'}.items():
             if name not in columns:
                 connection.execute(f'ALTER TABLE agent_runs ADD COLUMN {name} {definition}')
@@ -67,12 +98,22 @@ def active_run() -> dict | None:
         return dict(row) if row else None
 
 
-def finish(run_id: str, error: str | None = None, stop_reason: str | None = None, *, init_error=False, uncertain=False) -> None:
+def finish(run_id: str, error: str | None = None, stop_reason: str | None = None, *, init_error=False, uncertain=False, agent_uncertain=False) -> None:
     with board_store.connect() as connection:
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute(f'SELECT * FROM agent_runs WHERE id = ? AND {ACTIVE}', (run_id,)).fetchone()
         if row is None:
             return
+        # Cleanup can confirm the stop after recovery took its snapshot. Its
+        # newer persisted confirmation wins over that stale uncertainty.
+        agent_uncertain = (agent_uncertain or bool(row['agent_uncertain'])) and not row['agent_stop_confirmed']
+        if agent_uncertain:
+            connection.execute('UPDATE agent_runs SET agent_uncertain = 1 WHERE id = ?', (run_id,))
+            connection.execute('UPDATE board_tasks SET agent_uncertain = 1 WHERE id = ?', (row['task_pk'],))
+            note = 'Remote stop unconfirmed; retry blocked pending verification.'
+            error = error or 'Remote agent cleanup failed.'
+            if note not in error:
+                error += '\n' + note
         if row['phase'] == 'Init' and row['init_result'] != 'SUCCEEDED':
             init_error = True
             uncertain = uncertain or bool(row['init_uncertain'])
@@ -100,17 +141,39 @@ def finish(run_id: str, error: str | None = None, stop_reason: str | None = None
                 "ON CONFLICT(task_pk, run_id, role) DO UPDATE SET "
                 "text = task_chat_messages.text || char(10) || char(10) || excluded.text, "
                 "updated_at = excluded.updated_at",
-                (row['task_pk'], 'system' if init_error else 'agent', error, run_id),
+                (row['task_pk'], 'system' if init_error or agent_uncertain or stop_reason == 'cancelled' else 'agent', error, run_id),
             )
+
+
+def _expired(row):
+    if row['cancel_requested_at'] is not None:
+        return time.time() > row['cancel_requested_at'] + CANCEL_TIMEOUT + STOP_GRACE
+    grace = 10 if row['phase'] == 'Init' else STOP_GRACE if row['phase'] == 'Agent' else 0
+    return time.time() > (row['started_at'] or row['created_at']) + row['timeout'] + grace
+
+
+def _finish_recovered(row, error):
+    finish(row['id'], error, uncertain=row['phase'] == 'Init',
+           agent_uncertain=row['phase'] == 'Agent' and not row['agent_stop_confirmed'])
 
 
 def recover() -> None:
     row = active_run()
     if row is None:
         return
+    scope = row.get('executor_scope')
+    if scope is not None and scope != executor_scope():
+        # Absence in OUR process table says nothing about another host's PID.
+        return
+    if scope is None:
+        # Legacy Windows tokens are FILETIME decimals; Linux tokens contain a
+        # boot UUID and start ticks. Never inspect one with the other OS API.
+        token_is_windows = row['process_token'].isdecimal()
+        if token_is_windows != (os.name == 'nt'):
+            return
     try:
         identity = process_identity(row['pid'])
-        expired = time.time() - (row['started_at'] or row['created_at']) > row['timeout'] + (10 if row['phase'] == 'Init' else 0)
+        expired = _expired(row)
         if identity == row['process_token']:
             if not expired:
                 return
@@ -122,10 +185,10 @@ def recover() -> None:
                 current = active_run()
                 if current is None or current['id'] != row['id']:
                     return
-                if time.time() - (current['started_at'] or current['created_at']) <= current['timeout']:
+                if not _expired(current):
                     return
                 if terminate_process(row['pid'], row['process_token']):
-                    finish(row['id'], 'Agent executor expired.', uncertain=row['phase'] == 'Init')
+                    _finish_recovered(current, 'Agent executor expired.')
                 return
             # pidfd prevents signalling an unrelated process after PID reuse.
             fd = os.pidfd_open(row['pid'])
@@ -133,7 +196,7 @@ def recover() -> None:
                 current = active_run()
                 if current is None or current['id'] != row['id']:
                     return
-                if time.time() - (current['started_at'] or current['created_at']) <= current['timeout']:
+                if not _expired(current):
                     return
                 if process_identity(row['pid']) != row['process_token']:
                     return
@@ -150,9 +213,9 @@ def recover() -> None:
                     return
             finally:
                 os.close(fd)
-        finish(row['id'], 'Agent executor expired.' if expired else 'Agent executor terminated.', uncertain=row['phase'] == 'Init')
+        _finish_recovered(row, 'Agent executor expired.' if expired else 'Agent executor terminated.')
     except ProcessLookupError:
-        finish(row['id'], 'Agent executor terminated.', uncertain=row['phase'] == 'Init')
+        _finish_recovered(row, 'Agent executor terminated.')
     except (OSError, AttributeError):
         # An unverifiable owner must not be replaced by another session.
         return
@@ -164,7 +227,14 @@ def claim(timeout: float) -> dict | None:
         connection.execute('BEGIN IMMEDIATE')
         if connection.execute(f'SELECT 1 FROM agent_runs WHERE {ACTIVE}').fetchone():
             return None
-        task = connection.execute("SELECT * FROM board_tasks WHERE status = 'OPEN' AND init_uncertain = 0 ORDER BY sort_order, id LIMIT 1").fetchone()
+        blocked = connection.execute('SELECT r.id, t.task_id FROM agent_runs r LEFT JOIN board_tasks t '
+                                     'ON t.id = r.task_pk WHERE r.agent_uncertain = 1 ORDER BY r.created_at LIMIT 1').fetchone()
+        if blocked:
+            logger.warning('Agent queue blocked by unconfirmed remote stop: task=%s run=%s. '
+                           'Verify the remote agent has stopped, then use Agent Recovery on Board.',
+                           blocked['task_id'] or '(deleted)', blocked['id'])
+            return None
+        task = connection.execute("SELECT * FROM board_tasks WHERE status = 'OPEN' AND init_uncertain = 0 AND agent_uncertain = 0 ORDER BY sort_order, id LIMIT 1").fetchone()
         if task is None:
             return None
         run_id = uuid4().hex
@@ -172,8 +242,8 @@ def claim(timeout: float) -> dict | None:
         if token is None:
             raise RuntimeError('Cannot identify agent executor.')
         connection.execute(
-            "INSERT INTO agent_runs(id, task_pk, state, pid, process_token, created_at, timeout) VALUES (?, ?, 'PREPARING', ?, ?, ?, ?)",
-            (run_id, task['id'], os.getpid(), token, time.time(), timeout),
+            "INSERT INTO agent_runs(id, task_pk, state, pid, process_token, created_at, timeout, executor_scope) VALUES (?, ?, 'PREPARING', ?, ?, ?, ?, ?)",
+            (run_id, task['id'], os.getpid(), token, time.time(), timeout, executor_scope()),
         )
         cursor = connection.execute("UPDATE board_tasks SET status = 'IN PROGRESS', is_error = 0, phase = 'In progress', active_run_id = ? WHERE id = ? AND status = 'OPEN'", (run_id, task['id']))
         if cursor.rowcount != 1:

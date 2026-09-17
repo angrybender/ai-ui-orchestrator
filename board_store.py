@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -152,6 +153,7 @@ def init_database() -> None:
             'context_ready': 'INTEGER NOT NULL DEFAULT 0',
             'init_succeeded': 'INTEGER NOT NULL DEFAULT 0',
             'init_uncertain': 'INTEGER NOT NULL DEFAULT 0',
+            'agent_uncertain': 'INTEGER NOT NULL DEFAULT 0',
         }.items():
             if name not in columns:
                 connection.execute(f'ALTER TABLE board_tasks ADD COLUMN {name} {definition}')
@@ -354,6 +356,12 @@ def _save_files(
         )
 
 
+def _request_run_cancel(connection, run_id):
+    if run_id:
+        connection.execute("UPDATE agent_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?) "
+                           "WHERE id = ? AND state IN ('PREPARING', 'RUNNING')", (time.time(), run_id))
+
+
 def update_task(
     task_id: str,
     title: str,
@@ -378,6 +386,7 @@ def update_task(
             if status != row["status"] and status not in ALLOWED_TRANSITIONS.get(row["status"], set()):
                 raise BoardError({"status": f"Transition from {row['status']} to {status} is not allowed"})
             if row["status"] == "IN PROGRESS" and status != row["status"]:
+                _request_run_cancel(connection, row['active_run_id'])
                 connection.execute("UPDATE board_tasks SET active_run_id = NULL WHERE id = ?", (row["id"],))
             order = row["sort_order"]
             if status != row["status"]:
@@ -424,6 +433,7 @@ def move_task(
         if not force and status != source_status and status not in ALLOWED_TRANSITIONS.get(source_status, set()):
             raise BoardError(f"Transition from {source_status} to {status} is not allowed")
         if source_status == "IN PROGRESS" and status != source_status:
+            _request_run_cancel(connection, row['active_run_id'])
             connection.execute("UPDATE board_tasks SET active_run_id = NULL WHERE id = ?", (row["id"],))
         destination_ids = [
             item["id"]

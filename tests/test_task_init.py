@@ -278,7 +278,7 @@ def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monke
     ssh.channel.messages[1] = reply(2, {})  # session/load response
     assert agent_worker.execute() == 0
     assert calls == ['exit 2', 'echo fixed']
-    assert ssh.channel.command.endswith('--continue')
+    assert shlex.split(ssh.channel.command.split('bash -c ', 1)[1])[0].endswith('--continue')
 
 
 def test_cancel_fences_late_success_and_uncertain_retry():

@@ -25,7 +25,7 @@ def configure(directory: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", type=Path)
-    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "message", "context-conflict"))
+    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "agent-uncertain", "message", "context-conflict"))
     parser.add_argument("--run-id")
     args = parser.parse_args()
     if args.operation:
@@ -42,6 +42,9 @@ def main() -> None:
             from task_cycle import TaskCycle
             TaskCycle({'id': args.run_id}, {'tasks.init_script_timeout': 300, 'agent.agent_timeout': 300}).phase('Init' if args.operation == 'init' else 'Agent')
             result = {'phase': args.operation}
+        elif args.operation == 'agent-uncertain':
+            agent_store.finish(args.run_id, 'Remote stop unconfirmed.', agent_uncertain=True)
+            result = {'finished': args.run_id}
         elif args.operation == 'init-failure':
             agent_store.finish(args.run_id, 'Init script error: <img src=x onerror=alert(1)>', init_error=True)
             result = {'finished': args.run_id}

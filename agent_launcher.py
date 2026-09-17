@@ -19,6 +19,8 @@ def launch() -> int | None:
         connection.execute('BEGIN IMMEDIATE')
         active = connection.execute(f'SELECT * FROM agent_runs WHERE {agent_store.ACTIVE}').fetchone()
         if active:
+            if active['executor_scope'] is not None and active['executor_scope'] != agent_store.executor_scope():
+                return None
             try:
                 identity = agent_store.process_identity(active['pid'])
             except OSError:

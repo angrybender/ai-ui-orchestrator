@@ -1,4 +1,5 @@
-.board-heading { display:flex; align-items:end; justify-content:space-between; }
+.board-heading { display:flex; align-items:end; justify-content:flex-end; }
+.board-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:12px; }
 .task-dialog.has-chat, .task-page-editor.has-chat .task-dialog { width:min(100%, 1360px); }
 .task-page-editor.has-chat { max-width:1360px; }
 .task-dialog.has-chat .task-form { grid-template-columns:minmax(0, 1fr) minmax(0, .95fr); column-gap:22px; }
