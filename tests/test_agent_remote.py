@@ -3,6 +3,7 @@ import io
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -107,9 +108,21 @@ class FakeSFTP:
     def lstat(self, path):
         import stat
         from types import SimpleNamespace
+        if path in self.files:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o644)
         if path not in self.dirs:
             raise FileNotFoundError(path)
         return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755)
+
+    def listdir_attr(self, path):
+        from types import SimpleNamespace
+        import posixpath
+        return [SimpleNamespace(filename=posixpath.basename(item))
+                for item in self.files.keys() | self.dirs
+                if posixpath.dirname(item) == path]
+
+    def remove(self, path):
+        del self.files[path]
 
     def putfo(self, source, path):
         assert isinstance(source, io.BytesIO)
@@ -292,7 +305,8 @@ def test_missing_session_creates_new_session(setup, diagnostic, comment):
     expected = remote.task_prompt(task['task_id']) + ('\n\n' + comment if comment else '')
     assert requests[-1]['params'] == {'sessionId': 'replacement-session', 'prompt': [{'type': 'text', 'text': expected}]}
     assert sessions == ['replacement-session']
-    assert ssh.sftp.files == {'/tasks/PRJ-12/requirements-PRJ-12/TASK.md': b'original context'}
+    assert set(ssh.sftp.files) == {'/tasks/PRJ-12/requirements-PRJ-12/TASK.md'}
+    assert task['description'].encode() in ssh.sftp.files['/tasks/PRJ-12/requirements-PRJ-12/TASK.md']
     assert 'creating a new session' in logs[0]
     assert ssh.events.count('exec') == 1
 
@@ -593,7 +607,8 @@ def test_attachment_upload_failure_does_not_start(setup, tmp_path, monkeypatch):
     with pytest.raises(remote.RemoteAgentError):
         run([(local, "file.txt")])
     assert ssh.channel.command is None
-    assert "/tasks/PRJ-12/requirements-PRJ-12/TASK.md" in ssh.sftp.files
+    # The description is published only after attachments finish uploading.
+    assert "/tasks/PRJ-12/requirements-PRJ-12/TASK.md" not in ssh.sftp.files
 
 
 @pytest.mark.parametrize("stderr", [b"", b"Internal error: Connection error.\n"])
@@ -629,3 +644,55 @@ def test_worker_persists_acp_error_in_log_status_and_chat(setup, monkeypatch, st
     assert b'"details": "Connection error."' in raw.getvalue()
     if stderr:
         assert b"ERR " + stderr in raw.getvalue()
+
+
+def test_resume_mirrors_changed_added_and_deleted_attachments(setup, tmp_path):
+    ssh, config, task, _, _, run = setup
+    root = '/tasks/PRJ-12'
+    context = root + '/requirements-PRJ-12/'
+    ssh.sftp.dirs.update({root, context.rstrip('/')})
+    ssh.sftp.files.update({context + 'TASK.md': b'old description',
+                           context + 'removed.txt': b'obsolete',
+                           context + 'changed.txt': b'old bytes',
+                           root + '/result.txt': b'agent output'})
+    task.update(session_id='saved-session', description='New description')
+    ssh.channel.messages[1] = reply(2, {})
+    changed = tmp_path / 'changed.txt'
+    changed.write_bytes(b'updated bytes')
+    added = tmp_path / 'added.txt'
+    added.write_bytes(b'new bytes')
+    # Capture actual uploaded bytes rather than the shared fake's local paths.
+    ssh.sftp.put = lambda local, target: ssh.sftp.files.__setitem__(target, Path(local).read_bytes())
+    assert run([(changed, 'changed.txt'), (added, 'added.txt')])['stopReason'] == 'end_turn'
+    assert ssh.sftp.files[context + 'changed.txt'] == b'updated bytes'
+    assert ssh.sftp.files[context + 'added.txt'] == b'new bytes'
+    assert context + 'removed.txt' not in ssh.sftp.files
+    assert ssh.sftp.files[root + '/result.txt'] == b'agent output'
+    assert b'New description' in ssh.sftp.files[context + 'TASK.md']
+    assert b'removed.txt' not in ssh.sftp.files[context + 'TASK.md']
+
+
+@pytest.mark.parametrize('failure', ['upload', 'remove', 'symlink', 'directory'])
+def test_resume_sync_failure_prevents_agent(setup, monkeypatch, failure):
+    import stat
+    from types import SimpleNamespace
+    ssh, _, task, _, _, run = setup
+    root = '/tasks/PRJ-12'
+    context = root + '/requirements-PRJ-12'
+    ssh.sftp.dirs.update({root, context})
+    ssh.sftp.files[context + '/TASK.md'] = b'old context'
+    task['session_id'] = 'saved-session'
+    if failure == 'upload':
+        ssh.sftp.fail_upload = True
+    elif failure == 'remove':
+        def fail_remove(path):
+            raise OSError('Removal failed')
+        monkeypatch.setattr(ssh.sftp, 'remove', fail_remove)
+    else:
+        original = ssh.sftp.lstat
+        monkeypatch.setattr(ssh.sftp, 'lstat', lambda path: SimpleNamespace(
+            st_mode=stat.S_IFLNK if failure == 'symlink' else stat.S_IFDIR)
+            if path.endswith('/TASK.md') else original(path))
+    with pytest.raises(remote.RemoteAgentError):
+        run()
+    assert ssh.channel.command is None

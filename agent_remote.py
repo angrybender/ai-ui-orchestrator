@@ -1,7 +1,6 @@
 """SSH/SFTP ACP transport; persistence and process ownership belong to the caller."""
 from __future__ import annotations
 
-import io
 import json
 import math
 from pathlib import Path
@@ -16,7 +15,7 @@ from typing import Callable
 
 import paramiko
 from task_init import InitError, run_init
-from task_context import prepare_directory, task_prompt
+from task_context import prepare_directory, task_prompt, sync_context
 from agent_control import AgentControl, CANCEL_TIMEOUT, POLL_INTERVAL
 
 CONNECT_TIMEOUT = 20
@@ -342,10 +341,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             raise ValueError
         resume = cycle.reuse(cwd) if cycle else bool(task.get("session_id"))
         context_dir = prepare_directory(sftp, cwd, task['task_id'], resume)
-        if not resume:
-            sftp.putfo(io.BytesIO(text.encode("utf-8")), posixpath.join(context_dir, "TASK.md"))
-            for local, name in names:
-                sftp.put(str(local), posixpath.join(context_dir, name))
+        sync_context(sftp, context_dir, text, names, resume,
+                     cycle.check if cycle else lambda: None)
         if cycle:
             cycle.prepared(cwd)
             cycle.check()
