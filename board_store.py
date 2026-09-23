@@ -270,10 +270,11 @@ def add_user_comment(task_id: str, comment: str) -> dict[str, Any]:
         task = connection.execute("SELECT id, status FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if task is None:
             raise TaskNotFoundError("Task not found")
-        if task["status"] not in ("REVIEW", "WAIT"):
-            raise TaskConflictError("Comments are allowed only in REVIEW or WAIT")
+        if task["status"] not in ("BACKLOG", "REVIEW", "WAIT"):
+            raise TaskConflictError("Comments are allowed only in BACKLOG, REVIEW or WAIT")
         connection.execute("INSERT INTO task_chat_messages(task_pk, role, text, updated_at) VALUES (?, 'user', ?, ?)", (task["id"], comment.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
-        connection.execute("UPDATE board_tasks SET status = 'OPEN' WHERE id = ?", (task["id"],))
+        if task["status"] != "BACKLOG":
+            connection.execute("UPDATE board_tasks SET status = 'OPEN' WHERE id = ?", (task["id"],))
     return get_chat(task_id)
 
 
