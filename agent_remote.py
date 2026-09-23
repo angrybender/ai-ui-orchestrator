@@ -46,8 +46,18 @@ class RemoteAgentError(RuntimeError):
 
 
 class ACPError(RuntimeError):
-    def __init__(self, message: str):
+    def __init__(self, message: str, *, session_missing=False):
         super().__init__(message)
+        self.session_missing = session_missing
+
+
+def _session_missing(parts, session_id):
+    """Only explicit missing-session diagnostics permit a fresh session."""
+    return any(re.search(
+        r"\bsession(?:\s+['\"]?" + re.escape(session_id) + r"['\"]?)?\s+(?:was\s+|is\s+)?"
+        r"(?:not\s+found|does\s+not\s+exist|doesn't\s+exist)\b"
+        r"|\b(?:unknown|nonexistent|non-existent)\s+session\b",
+        part, re.IGNORECASE) for part in parts)
 
 
 def _name(value: str) -> bool:
@@ -239,6 +249,8 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
             raise ValueError
         if "error" in message:
+            if type(message.get("id")) is not int or message["id"] != request_id:
+                raise ValueError
             error = message.get("error")
             if isinstance(error, dict):
                 message_text = error.get("message")
@@ -246,7 +258,9 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
                 details = data.get("details") if isinstance(data, dict) else None
                 parts = [value.strip() for value in (message_text, details)
                          if isinstance(value, str) and value.strip()]
-                raise ACPError(f"{method}: {': '.join(parts)}" if parts else f"{method}: ACP request failed")
+                raise ACPError(
+                    f"{method}: {': '.join(parts)}" if parts else f"{method}: ACP request failed",
+                    session_missing=method == "session/load" and _session_missing(parts, params.get('sessionId', '')))
             raise ValueError
         if "method" in message:
             if not isinstance(message["method"], str) or "result" in message:
@@ -260,15 +274,6 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
                 _event(message, diagnostics, on_message, raw_log)
             continue
         if type(message.get("id")) is not int or message["id"] != request_id:
-            raise ValueError
-        if "error" in message:
-            error = message.get("error")
-            if isinstance(error, dict) and isinstance(error.get("message"), str):
-                details = error.get("data", {}).get("details") if isinstance(error.get("data"), dict) else None
-                text = error["message"]
-                if isinstance(details, str) and details.strip():
-                    text = f"{text}: {details}"
-                raise ACPError(text)
             raise ValueError
         if not isinstance(message.get("result"), dict):
             raise ValueError
@@ -411,14 +416,28 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
                 stage = "session/load" if task.get("session_id") else "session/new"
+                request_id = 2
+                session_id = None
+                session_prompt = prompt
                 if task.get("session_id"):
                     session_id = task.get("session_id")
                     if not isinstance(session_id, str) or not session_id.strip():
                         raise ACPError("session/load: missing saved session id")
-                    session = _request(stdin, stdout, 2, "session/load", {
-                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
-                else:
-                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
+                    try:
+                        _request(stdin, stdout, request_id, "session/load", {
+                            "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
+                    except ACPError as exception:
+                        if not exception.session_missing:
+                            raise
+                        diagnostics.append("exception", "Saved ACP session not found; creating a new session.\n")
+                        session_id = None
+                        request_id += 1
+                        session_prompt = task_prompt(task['task_id'])
+                        if task.get('comment'):
+                            session_prompt += '\n\n' + task['comment']
+                if session_id is None:
+                    stage = "session/new"
+                    session = _request(stdin, stdout, request_id, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
                     session_id = session.get("sessionId")
                     if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
                         raise ValueError("Missing, invalid or unsafe sessionId")
@@ -427,8 +446,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 stage = "persist sessionId"
                 on_session(session_id)
                 stage = "session/prompt"
-                result = _request(stdin, stdout, 3, "session/prompt", {
-                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message, raw_log, control.send)
+                result = _request(stdin, stdout, request_id + 1, "session/prompt", {
+                    "sessionId": session_id, "prompt": [{"type": "text", "text": session_prompt}]}, diagnostics, cancelled, on_message, raw_log, control.send)
                 reason = result.get("stopReason")
                 if reason == 'cancelled' and control.requested.is_set():
                     outcome.update(sessionId=session_id, stopReason=reason)

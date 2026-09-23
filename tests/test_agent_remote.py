@@ -269,6 +269,118 @@ def test_bad_task_id_before_connect(setup, task_id):
     assert ssh.connect_args is None
 
 
+@pytest.mark.parametrize("diagnostic", [
+    "Session not found: saved-session", "Session saved-session not found",
+    "Session does not exist", "Unknown session: saved-session",
+    "Session 'saved-session' does not exist",
+])
+@pytest.mark.parametrize("comment", [None, "Continue with the requested fix"])
+def test_missing_session_creates_new_session(setup, diagnostic, comment):
+    ssh, config, task, logs, sessions, run = setup
+    task.update(session_id="saved-session", comment=comment)
+    config['agent.continue_session_arg'] = '--continue'
+    ssh.sftp.dirs.update({"/tasks/PRJ-12", "/tasks/PRJ-12/requirements-PRJ-12"})
+    ssh.sftp.files['/tasks/PRJ-12/requirements-PRJ-12/TASK.md'] = b'original context'
+    ssh.channel.messages = [reply(1, {"protocolVersion": 1}),
+        {"jsonrpc": "2.0", "id": 2, "error": {
+            "code": -32603, "message": "Internal error", "data": {"details": diagnostic}}},
+        reply(3, {"sessionId": "replacement-session"}), reply(4, {"stopReason": "end_turn"})]
+    assert run() == {"sessionId": "replacement-session", "stopReason": "end_turn"}
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert [r['method'] for r in requests] == ['initialize', 'session/load', 'session/new', 'session/prompt']
+    assert [r['id'] for r in requests] == [1, 2, 3, 4]
+    expected = remote.task_prompt(task['task_id']) + ('\n\n' + comment if comment else '')
+    assert requests[-1]['params'] == {'sessionId': 'replacement-session', 'prompt': [{'type': 'text', 'text': expected}]}
+    assert sessions == ['replacement-session']
+    assert ssh.sftp.files == {'/tasks/PRJ-12/requirements-PRJ-12/TASK.md': b'original context'}
+    assert 'creating a new session' in logs[0]
+    assert ssh.events.count('exec') == 1
+
+
+@pytest.mark.parametrize('message,response_id', [
+    ('Permission denied', 2), ('Session temporarily unavailable', 2),
+    ('Method not found', 2), ('Session file not found: configuration.json', 2),
+    ('Session not found', 99),
+])
+def test_load_errors_do_not_create_replacement(setup, message, response_id):
+    ssh, _, task, _, sessions, run = setup
+    task['session_id'] = 'saved-session'
+    ssh.sftp.dirs.update({'/tasks/PRJ-12', '/tasks/PRJ-12/requirements-PRJ-12'})
+    ssh.channel.messages[1] = {'jsonrpc': '2.0', 'id': response_id,
+                               'error': {'code': -32603, 'message': message}}
+    with pytest.raises(remote.RemoteAgentError):
+        run()
+    assert sessions == []
+    assert [json.loads(line)['method'] for line in ssh.channel.stdin.getvalue().splitlines()] == ['initialize', 'session/load']
+
+
+@pytest.mark.parametrize('replacement', [
+    reply(3, {'sessionId': ''}),
+    {'jsonrpc': '2.0', 'id': 3, 'error': {'code': -32603, 'message': 'Session not found'}},
+])
+def test_failed_replacement_is_not_retried(setup, replacement):
+    ssh, _, task, _, sessions, run = setup
+    task['session_id'] = 'saved-session'
+    ssh.sftp.dirs.update({'/tasks/PRJ-12', '/tasks/PRJ-12/requirements-PRJ-12'})
+    ssh.channel.messages[1:] = [
+        {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}}, replacement]
+    with pytest.raises(remote.RemoteAgentError, match='session/new'):
+        run()
+    assert sessions == []
+    assert len(ssh.channel.stdin.getvalue().splitlines()) == 3
+
+
+def test_backlog_edits_then_missing_session_recovery_persisted(setup, monkeypatch):
+    import agent_store
+    import agent_worker
+    import board_store
+
+    ssh, config, _, _, _, _ = setup
+    monkeypatch.setattr(agent_worker.Config, 'get', staticmethod(config.get))
+    board_store.init_database()
+    agent_store.init_database()
+    board_store.create_task('PRJ-12', 'Initial', 'Initial description', [])
+    for n in range(4):
+        board_store.update_task('PRJ-12', f'Title {n}', f'Description {n}', 'BACKLOG', [], [])
+    with board_store.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM agent_runs').fetchone()[0] == 0
+    board_store.move_task('PRJ-12', 'OPEN', 0)
+    assert agent_worker.execute() == 0
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert [r['method'] for r in requests] == ['initialize', 'session/new', 'session/prompt']
+    original_files = dict(ssh.sftp.files)
+    assert b'Description 3' in next(iter(original_files.values()))
+
+    board_store.add_user_comment('PRJ-12', 'Continue the work')
+    ssh.channel = FakeChannel(ssh)
+    ssh.channel.messages = [reply(1, {'protocolVersion': 1}),
+        {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}},
+        reply(3, {'sessionId': 'replacement-session'}), update('Completed after recovery'),
+        reply(4, {'stopReason': 'end_turn'})]
+    original_session = agent_store.session
+
+    def persist(run_id, session_id):
+        task = board_store.get_task('PRJ-12')
+        assert task['status'] == 'IN PROGRESS' and not task['is_error']
+        original_session(run_id, session_id)
+
+    monkeypatch.setattr(agent_store, 'session', persist)
+    assert agent_worker.execute() == 0
+    task = board_store.get_task('PRJ-12')
+    assert task['status'] == 'REVIEW' and not task['is_error']
+    assert ssh.sftp.files == original_files
+    with board_store.connect() as db:
+        runs = db.execute('SELECT * FROM agent_runs ORDER BY created_at').fetchall()
+    assert len(runs) == 2
+    assert runs[-1]['session_id'] == 'replacement-session'
+    assert runs[-1]['state'] == 'SUCCEEDED' and not runs[-1]['error']
+    assert [m['text'] for m in board_store.get_chat('PRJ-12')['messages']] == ['Continue the work', 'Completed after recovery']
+    board_store.add_user_comment('PRJ-12', 'Verify once more')
+    next_run = agent_store.claim(60)
+    assert next_run['session_id'] == 'replacement-session'
+    agent_store.finish(next_run['id'], stop_reason='end_turn')
+
+
 @pytest.mark.parametrize("key,value", [("remote_server.host", "host:99999"), ("remote_server.username", ""),
     ("tasks.base_dir", "relative"), ("agent.shell", ""), ("agent.agent_timeout", 0),
     ("agent.agent_timeout", float("inf")), ("remote_server.password", "")])

@@ -74,11 +74,21 @@ const python = process.env.PYTHON || 'python3';
     const id = 'LIVE-1';
     assert.equal((await api('POST', '', { task_id: id, title: 'Cross-process agent execution', description: 'Original description' })).status, 201);
     await state(id, 'BACKLOG');
+    for (let edit = 1; edit <= 3; edit++) {
+      await card(id).click();
+      await page.locator('#task-title').fill(`Backlog edit ${edit}`);
+      await page.locator('#task-description').fill(`Description after edit ${edit}`);
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect(page.locator('#task-modal')).toBeHidden();
+      await state(id, 'BACKLOG');
+      await expect(card(id)).toContainText(`Backlog edit ${edit}`);
+    }
     assert.equal((await api('PATCH', `/${id}/move`, { status: 'OPEN', position: 0 })).status, 200);
     await state(id, 'OPEN');
     await expect(column('BACKLOG').locator('.column-count')).toHaveText('0');
     const first = agent('claim');
     assert.equal(first.task_id, id);
+    assert.equal(first.session_id, null);
     await state(id, 'IN PROGRESS');
     await expect(column('OPEN').locator('.column-count')).toHaveText('0');
     await expect(card(id).locator('.task-extra-status')).toHaveText('In progress');
@@ -101,7 +111,7 @@ const python = process.env.PYTHON || 'python3';
     await page.locator('#cancel-task').click();
     await expect(card(id).locator('.task-extra-status')).toHaveCount(0);
     await expect(card(id).locator('.task-card-bar')).toHaveCSS('background-color', 'rgb(131, 201, 102)');
-    assert.equal((await api('GET', `/${id}`)).body.title, 'Cross-process agent execution');
+    assert.equal((await api('GET', `/${id}`)).body.title, 'Backlog edit 3');
     await screenshot('review');
 
     assert.equal((await api('PATCH', `/${id}/move`, { status: 'OPEN', position: 0 })).status, 200);
@@ -121,6 +131,7 @@ const python = process.env.PYTHON || 'python3';
     assert.equal(chat.status, 200);
     assert.equal(chat.body.status, 'OPEN');
     assert.deepEqual(chat.body.messages.map(({ role, text }) => ({ role, text })), [
+      { role: 'agent', text: 'Live test agent failure' },
       { role: 'user', text: 'Resume after the agent error' }
     ]);
     assert.deepEqual((await api('GET', `/${id}/chat`)).body, chat.body);
