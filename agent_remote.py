@@ -150,19 +150,22 @@ class _Diagnostics:
                 self.secrets.update(lines)
                 self.secrets.add("".join(lines))
 
-    def safe(self, text):
+    def safe(self, text, *, partial_suffix=True):
+        """Mask incomplete suffixes only for potentially truncated stream text."""
         # Include unterminated PEM blocks and a truncated opening marker.
         text = re.sub(r"-----BEGIN [^\r\n]*PRIVATE KEY-----.*?(?:-----END [^\r\n]*PRIVATE KEY-----|\Z)",
                       "[REDACTED]", text, flags=re.S)
         text = re.sub(r"-----BEGIN [^\r\n]*(?:\Z)", "[REDACTED]", text)
         for secret in sorted(self.secrets, key=len, reverse=True):
             text = text.replace(secret, "[REDACTED]")
+            if not partial_suffix:
+                continue
             # Preserve diagnostics on failure without leaking a final partial secret.
             for size in range(min(len(secret) - 1, len(text)), 0, -1):
                 if text.endswith(secret[:size]):
                     text = text[:-size] + "[REDACTED]"
                     break
-        for size in range(min(len("-----BEGIN "), len(text)), 0, -1):
+        for size in range(min(len("-----BEGIN "), len(text)) if partial_suffix else 0, 0, -1):
             if text.endswith("-----BEGIN "[:size]):
                 text = text[:-size] + "[REDACTED]"
                 break
@@ -436,7 +439,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     stage = "session/new"
                     session = _request(stdin, stdout, request_id, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
                     session_id = session.get("sessionId")
-                    if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
+                    # A parsed JSON field is complete, unlike ACP/stderr chunks.
+                    if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id, partial_suffix=False) != session_id:
                         raise ValueError("Missing, invalid or unsafe sessionId")
                 if cancelled.is_set():
                     return

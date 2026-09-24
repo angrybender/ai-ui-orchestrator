@@ -558,12 +558,34 @@ def test_internal_failure_preserves_safe_diagnostic(setup):
     assert logs and "session/new: ValueError: Missing, invalid or unsafe sessionId" in logs[0]
 
 
-def test_secret_session_id_rejected_without_callback(setup):
+@pytest.mark.parametrize('session_id', ['secret-password', 'id-secret-password-tail'])
+def test_secret_session_id_rejected_without_callback(setup, session_id):
     ssh, _, _, _, sessions, run = setup
-    ssh.channel.messages[1] = reply(2, {"sessionId": "secret-password"})
+    ssh.channel.messages[1] = reply(2, {"sessionId": session_id})
     with pytest.raises(remote.RemoteAgentError):
         run()
     assert sessions == []
+
+
+@pytest.mark.parametrize('suffix', ['a', 'ab', 'abc', '-'])
+@pytest.mark.parametrize('recover', [False, True])
+def test_complete_session_id_accepts_partial_secret_suffix(setup, suffix, recover):
+    ssh, config, task, _, sessions, run = setup
+    config['remote_server.password'] = 'abcdef-secret'
+    session_id = '12345678-1234-1234-1234-123456789' + suffix
+    if recover:
+        task['session_id'] = 'saved-session'
+        ssh.sftp.dirs.update({'/tasks/PRJ-12', '/tasks/PRJ-12/requirements-PRJ-12'})
+        ssh.channel.messages[1:] = [
+            {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}},
+            reply(3, {'sessionId': session_id}), reply(4, {'stopReason': 'end_turn'})]
+    else:
+        ssh.channel.messages[1] = reply(2, {'sessionId': session_id})
+    assert run() == {'sessionId': session_id, 'stopReason': 'end_turn'}
+    assert sessions == [session_id]
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert requests[-1]['method'] == 'session/prompt'
+    assert requests[-1]['params']['sessionId'] == session_id
 
 
 def test_empty_attachments_and_default_port(setup):
