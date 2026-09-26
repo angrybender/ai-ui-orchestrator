@@ -39,7 +39,8 @@ class TaskConflictError(BoardError):
 
 
 def connect() -> sqlite3.Connection:
-    connection = sqlite3.connect(DATABASE_PATH)
+    # SQLite retries busy operations for up to 10 seconds before raising.
+    connection = sqlite3.connect(DATABASE_PATH, timeout=10.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
@@ -190,15 +191,24 @@ def _serialize(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
 
 
 def list_tasks() -> list[dict[str, Any]]:
-    with closing(connect()) as connection:
-        connection.execute("BEGIN")
-        rows = connection.execute(
-            "SELECT * FROM board_tasks WHERE status != ? ORDER BY CASE status "
-            + " ".join(f"WHEN '{status}' THEN {index}" for index, status in enumerate(STATUSES))
-            + " END, sort_order, id",
-            (ARCHIVE_STATUS,),
-        ).fetchall()
-        return [_serialize(connection, row) for row in rows]
+    for attempt in range(3):
+        try:
+            # Retry the entire snapshot with a fresh connection/transaction.
+            with closing(connect()) as connection:
+                connection.execute("BEGIN")
+                rows = connection.execute(
+                    "SELECT * FROM board_tasks WHERE status != ? ORDER BY CASE status "
+                    + " ".join(f"WHEN '{status}' THEN {index}" for index, status in enumerate(STATUSES))
+                    + " END, sort_order, id",
+                    (ARCHIVE_STATUS,),
+                ).fetchall()
+                return [_serialize(connection, row) for row in rows]
+        except sqlite3.OperationalError as error:
+            # Include extended codes such as SQLITE_BUSY_SNAPSHOT.
+            code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+            if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 2:
+                raise
+            time.sleep(0.1)
 
 
 def get_task(task_id: str) -> dict[str, Any]:
