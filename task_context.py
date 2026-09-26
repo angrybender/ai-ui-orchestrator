@@ -1,4 +1,5 @@
-"""Remote task workspace and exclusive requirements directory preparation."""
+"""Remote task workspace preparation and requirements synchronization."""
+import io
 import posixpath
 import stat
 
@@ -53,3 +54,35 @@ def prepare_directory(sftp, cwd, task_id, reuse):
         if posixpath.normpath(sftp.normalize(path)) != path:
             raise ValueError('Unsafe task directory.')
     return path
+
+
+def sync_context(sftp, path, text, attachments, reuse, check=lambda: None):
+    """Mirror application-owned requirements files before Init or ACP starts."""
+    existing = set()
+    if reuse:
+        for entry in sftp.listdir_attr(path):
+            name = entry.filename
+            if not name or name in ('.', '..') or '/' in name or '\\' in name:
+                raise ValueError('Unsafe requirements file name.')
+            if not stat.S_ISREG(sftp.lstat(posixpath.join(path, name)).st_mode):
+                raise ValueError('Unsafe requirements file: ' + name)
+            existing.add(name)
+
+    expected = {'TASK.md'} | {name for _, name in attachments}
+
+    def replace(name, upload):
+        check()
+        target = posixpath.join(path, name)
+        if name in existing:
+            # Unlink first so overwriting a hard link cannot change files outside
+            # the requirements directory. Symlinks were rejected above.
+            sftp.remove(target)
+        upload(target)
+
+    for local, name in attachments:
+        replace(name, lambda target: sftp.put(str(local), target))
+    for name in sorted(existing - expected):
+        check()
+        sftp.remove(posixpath.join(path, name))
+    replace('TASK.md', lambda target: sftp.putfo(io.BytesIO(text.encode('utf-8')), target))
+    check()

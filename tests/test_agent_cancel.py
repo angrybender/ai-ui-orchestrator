@@ -50,9 +50,14 @@ def test_cancel_stops_real_agent_and_descendant(tmp_path, monkeypatch, mode, tra
         assert saved['agent_uncertain'] == 0
         assert agent_store.active_run() is None
         assert all('late reply' not in m['text'] for m in board_store.get_chat('CANCEL-1')['messages'])
+        chat = board_store.add_user_comment('CANCEL-1', 'Resume after stopping')
+        assert chat['status'] == 'BACKLOG'
+        assert agent_store.claim(60) is None
         board_store.move_task('CANCEL-1', 'OPEN', 0)
         replacement = agent_store.claim(60)
         assert replacement and replacement['id'] != run['id']
+        assert replacement['comment'] == 'Resume after stopping'
+        assert replacement['session_id'] == saved['session_id']
         agent_store.finish(run['id'], 'Late old error')
         assert board_store.get_task('CANCEL-1')['status'] == 'IN PROGRESS'
         agent_store.finish(replacement['id'], 'Fixture cleanup')

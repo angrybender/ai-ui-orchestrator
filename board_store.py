@@ -19,6 +19,7 @@ ARCHIVE_STATUS = "ARCHIVE"
 ALL_STATUSES = (*STATUSES, ARCHIVE_STATUS)
 ALLOWED_TRANSITIONS = {
     "BACKLOG": {"OPEN", ARCHIVE_STATUS},
+    "OPEN": {"BACKLOG"},
     "WAIT": {ARCHIVE_STATUS},
     "IN PROGRESS": {"BACKLOG"},
     "REVIEW": {"OPEN", "BACKLOG", "DONE"},
@@ -39,7 +40,8 @@ class TaskConflictError(BoardError):
 
 
 def connect() -> sqlite3.Connection:
-    connection = sqlite3.connect(DATABASE_PATH)
+    # SQLite retries busy operations for up to 10 seconds before raising.
+    connection = sqlite3.connect(DATABASE_PATH, timeout=10.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
@@ -190,15 +192,24 @@ def _serialize(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
 
 
 def list_tasks() -> list[dict[str, Any]]:
-    with closing(connect()) as connection:
-        connection.execute("BEGIN")
-        rows = connection.execute(
-            "SELECT * FROM board_tasks WHERE status != ? ORDER BY CASE status "
-            + " ".join(f"WHEN '{status}' THEN {index}" for index, status in enumerate(STATUSES))
-            + " END, sort_order, id",
-            (ARCHIVE_STATUS,),
-        ).fetchall()
-        return [_serialize(connection, row) for row in rows]
+    for attempt in range(3):
+        try:
+            # Retry the entire snapshot with a fresh connection/transaction.
+            with closing(connect()) as connection:
+                connection.execute("BEGIN")
+                rows = connection.execute(
+                    "SELECT * FROM board_tasks WHERE status != ? ORDER BY CASE status "
+                    + " ".join(f"WHEN '{status}' THEN {index}" for index, status in enumerate(STATUSES))
+                    + " END, sort_order, id",
+                    (ARCHIVE_STATUS,),
+                ).fetchall()
+                return [_serialize(connection, row) for row in rows]
+        except sqlite3.OperationalError as error:
+            # Include extended codes such as SQLITE_BUSY_SNAPSHOT.
+            code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+            if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 2:
+                raise
+            time.sleep(0.1)
 
 
 def get_task(task_id: str) -> dict[str, Any]:
@@ -270,10 +281,11 @@ def add_user_comment(task_id: str, comment: str) -> dict[str, Any]:
         task = connection.execute("SELECT id, status FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if task is None:
             raise TaskNotFoundError("Task not found")
-        if task["status"] not in ("REVIEW", "WAIT"):
-            raise TaskConflictError("Comments are allowed only in REVIEW or WAIT")
+        if task["status"] not in ("BACKLOG", "REVIEW", "WAIT"):
+            raise TaskConflictError("Comments are allowed only in BACKLOG, REVIEW or WAIT")
         connection.execute("INSERT INTO task_chat_messages(task_pk, role, text, updated_at) VALUES (?, 'user', ?, ?)", (task["id"], comment.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
-        connection.execute("UPDATE board_tasks SET status = 'OPEN' WHERE id = ?", (task["id"],))
+        if task["status"] != "BACKLOG":
+            connection.execute("UPDATE board_tasks SET status = 'OPEN' WHERE id = ?", (task["id"],))
     return get_chat(task_id)
 
 
