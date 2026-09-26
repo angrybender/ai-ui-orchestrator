@@ -86,6 +86,38 @@ const python = process.env.PYTHON || 'python3';
     assert.equal((await api('PATCH', `/${id}/move`, { status: 'OPEN', position: 0 })).status, 200);
     await state(id, 'OPEN');
     await expect(column('BACKLOG').locator('.column-count')).toHaveText('0');
+    // Return a queued task through both editing views and native drag and drop.
+    await card(id).click();
+    await page.locator('#task-status').selectOption('BACKLOG');
+    await screenshot('open-backlog-modal');
+    await page.locator('#save-task').click();
+    await expect(page.locator('#task-modal')).toBeHidden();
+    await state(id, 'BACKLOG');
+    assert.equal((await api('GET', `/${id}`)).body.status, 'BACKLOG');
+    assert.equal((await api('PATCH', `/${id}/move`, { status: 'OPEN', position: 0 })).status, 200);
+    await state(id, 'OPEN');
+    await card(id).dragTo(column('BACKLOG').locator('.task-list'));
+    await state(id, 'BACKLOG');
+    assert.equal((await api('GET', `/${id}`)).body.status, 'BACKLOG');
+    await screenshot('open-backlog-board');
+    assert.equal((await api('PATCH', `/${id}/move`, { status: 'OPEN', position: 0 })).status, 200);
+    const taskPage = await context.newPage();
+    taskPage.on('pageerror', error => errors.push(error.message));
+    await taskPage.goto(`${info.url}/tasks/${id}`, { waitUntil: 'domcontentloaded' });
+    await taskPage.locator('#task-status').selectOption('BACKLOG');
+    await taskPage.locator('#save-task').click();
+    await expect(taskPage.locator('#delete-task')).toBeVisible();
+    await expect(taskPage.locator('#task-status')).toHaveValue('BACKLOG');
+    await taskPage.reload({ waitUntil: 'domcontentloaded' });
+    await expect(taskPage.locator('#task-status')).toHaveValue('BACKLOG');
+    await taskPage.setViewportSize({ width: 375, height: 900 });
+    assert.equal(await taskPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    if (process.env.BOARD_LIVE_SCREENSHOTS === '1') {
+      await taskPage.screenshot({ path: path.join(root, 'board-live-open-backlog-mobile.png'), fullPage: true });
+    }
+    await taskPage.close();
+    assert.equal((await api('PATCH', `/${id}/move`, { status: 'OPEN', position: 0 })).status, 200);
+    await state(id, 'OPEN');
     const first = agent('claim');
     assert.equal(first.task_id, id);
     assert.equal(first.session_id, null);
@@ -182,7 +214,7 @@ const python = process.env.PYTHON || 'python3';
     await state(id, 'REVIEW');
     assert.equal(navigations, 1, 'Live updates must not navigate/reload the Board');
     assert.deepEqual(errors, []);
-    console.log('PASS: real FastAPI/SSE + cross-process claim/finish; cards, counts, indicator, error, unsaved modal, offline reconnect and drag deferral.');
+    console.log('PASS: real FastAPI/SSE + cross-process claim/finish; OPEN to BACKLOG via both forms and drag/drop, mobile layout, cards, counts, indicator, error, unsaved modal, offline reconnect and drag deferral.');
   } finally {
     if (browser) await browser.close();
     if (server.exitCode === null && server.signalCode === null && server.pid) {

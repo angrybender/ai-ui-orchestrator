@@ -2,7 +2,7 @@
   "use strict";
 
   const statuses = ["BACKLOG", "OPEN", "WAIT", "IN PROGRESS", "REVIEW", "DONE"];
-  const transitions = { "BACKLOG": ["OPEN", "ARCHIVE"], "WAIT": ["ARCHIVE"], "IN PROGRESS": ["BACKLOG"], "REVIEW": ["OPEN", "BACKLOG", "DONE"], "DONE": ["ARCHIVE"] };
+  const transitions = { "BACKLOG": ["OPEN", "ARCHIVE"], "OPEN": ["BACKLOG"], "WAIT": ["ARCHIVE"], "IN PROGRESS": ["BACKLOG"], "REVIEW": ["OPEN", "BACKLOG", "DONE"], "DONE": ["ARCHIVE"] };
   let tasks = [];
   let editing = null;
   let removedAttachments = [];
