@@ -19,6 +19,7 @@ ARCHIVE_STATUS = "ARCHIVE"
 ALL_STATUSES = (*STATUSES, ARCHIVE_STATUS)
 ALLOWED_TRANSITIONS = {
     "BACKLOG": {"OPEN", ARCHIVE_STATUS},
+    "OPEN": {"BACKLOG"},
     "WAIT": {ARCHIVE_STATUS},
     "IN PROGRESS": {"BACKLOG"},
     "REVIEW": {"OPEN", "BACKLOG", "DONE"},
@@ -39,16 +40,26 @@ class TaskConflictError(BoardError):
 
 
 def connect() -> sqlite3.Connection:
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
+    """Open a caller-owned connection; its transaction context does not close it.
+
+    Use ``with closing(connect()) as connection, connection:`` to commit/rollback
+    before closing, including on early returns and exceptions.
+    """
+    # SQLite retries busy operations for up to 10 seconds before raising.
+    connection = sqlite3.connect(DATABASE_PATH, timeout=10.0)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 
 def init_database() -> None:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FILES_DIR.mkdir(parents=True, exist_ok=True)
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS board_tasks (
@@ -190,19 +201,28 @@ def _serialize(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
 
 
 def list_tasks() -> list[dict[str, Any]]:
-    with closing(connect()) as connection:
-        connection.execute("BEGIN")
-        rows = connection.execute(
-            "SELECT * FROM board_tasks WHERE status != ? ORDER BY CASE status "
-            + " ".join(f"WHEN '{status}' THEN {index}" for index, status in enumerate(STATUSES))
-            + " END, sort_order, id",
-            (ARCHIVE_STATUS,),
-        ).fetchall()
-        return [_serialize(connection, row) for row in rows]
+    for attempt in range(3):
+        try:
+            # Retry the entire snapshot with a fresh connection/transaction.
+            with closing(connect()) as connection:
+                connection.execute("BEGIN")
+                rows = connection.execute(
+                    "SELECT * FROM board_tasks WHERE status != ? ORDER BY CASE status "
+                    + " ".join(f"WHEN '{status}' THEN {index}" for index, status in enumerate(STATUSES))
+                    + " END, sort_order, id",
+                    (ARCHIVE_STATUS,),
+                ).fetchall()
+                return [_serialize(connection, row) for row in rows]
+        except sqlite3.OperationalError as error:
+            # Include extended codes such as SQLITE_BUSY_SNAPSHOT.
+            code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+            if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 2:
+                raise
+            time.sleep(0.1)
 
 
 def get_task(task_id: str) -> dict[str, Any]:
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         row = connection.execute("SELECT * FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if row is None:
             raise TaskNotFoundError("Task not found")
@@ -212,7 +232,7 @@ def get_task(task_id: str) -> dict[str, Any]:
 def list_archive(page: int, page_size: int = 20) -> tuple[list[dict[str, Any]], int]:
     if page < 1 or page_size < 1:
         raise BoardError("Invalid page")
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         total = connection.execute("SELECT COUNT(*) FROM board_tasks WHERE status = ?", (ARCHIVE_STATUS,)).fetchone()[0]
         rows = connection.execute(
             "SELECT * FROM board_tasks WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
@@ -231,7 +251,7 @@ def delete_backlog_task(task_id: str) -> None:
 
 def _delete_task(task_id: str, required_status: str) -> None:
     paths: list[Path] = []
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute("SELECT id, status FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if row is None or row["status"] != required_status:
@@ -250,7 +270,7 @@ def _delete_task(task_id: str, required_status: str) -> None:
 
 
 def get_chat(task_id: str) -> dict[str, Any]:
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         task = connection.execute("SELECT id, status FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if task is None:
             raise TaskNotFoundError("Task not found")
@@ -265,27 +285,28 @@ def get_chat(task_id: str) -> dict[str, Any]:
 def add_user_comment(task_id: str, comment: str) -> dict[str, Any]:
     if not isinstance(comment, str) or not comment.strip() or len(comment) > 32000:
         raise BoardError("Invalid comment")
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         task = connection.execute("SELECT id, status FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if task is None:
             raise TaskNotFoundError("Task not found")
-        if task["status"] not in ("REVIEW", "WAIT"):
-            raise TaskConflictError("Comments are allowed only in REVIEW or WAIT")
+        if task["status"] not in ("BACKLOG", "REVIEW", "WAIT"):
+            raise TaskConflictError("Comments are allowed only in BACKLOG, REVIEW or WAIT")
         connection.execute("INSERT INTO task_chat_messages(task_pk, role, text, updated_at) VALUES (?, 'user', ?, ?)", (task["id"], comment.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
-        connection.execute("UPDATE board_tasks SET status = 'OPEN' WHERE id = ?", (task["id"],))
+        if task["status"] != "BACKLOG":
+            connection.execute("UPDATE board_tasks SET status = 'OPEN' WHERE id = ?", (task["id"],))
     return get_chat(task_id)
 
 
 def upsert_agent_message(task_pk: int, run_id: str, text: str) -> None:
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute("INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, 'agent', ?, ?, ?) ON CONFLICT(task_pk, run_id, role) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at", (task_pk, text, run_id, datetime.now().strftime("%Y-%m-%d %H:%M")))
 
 
 def next_task_id() -> str:
     prefix = str(Config.get("board.task_prefix") or "TASK").strip() or "TASK"
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         rows = connection.execute("SELECT task_id FROM board_tasks ORDER BY id DESC").fetchall()
         number = 1
         if rows:
@@ -318,7 +339,7 @@ def create_task(task_id: str, title: str, description: str, files: list[tuple[st
         raise BoardError(errors)
     written: list[Path] = []
     try:
-        with connect() as connection:
+        with closing(connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             order = connection.execute(
                 "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM board_tasks WHERE status = 'BACKLOG'"
@@ -376,7 +397,7 @@ def update_task(
     written: list[Path] = []
     removed_paths: list[Path] = []
     try:
-        with connect() as connection:
+        with closing(connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT * FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
             if row is None:
@@ -424,7 +445,7 @@ def move_task(
 ) -> list[dict[str, Any]]:
     if status not in ALL_STATUSES or position < 0:
         raise BoardError("Invalid move")
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute("SELECT * FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if row is None:
@@ -457,7 +478,7 @@ def move_task(
 
 
 def attachment_path(task_id: str, attachment_id: int) -> tuple[Path, str, str | None]:
-    with connect() as connection:
+    with closing(connect()) as connection, connection:
         row = connection.execute(
             "SELECT a.stored_name, a.original_name, a.content_type FROM board_attachments a "
             "JOIN board_tasks t ON t.id = a.task_pk WHERE t.task_id = ? AND a.id = ?",

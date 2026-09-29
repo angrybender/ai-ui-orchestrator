@@ -50,6 +50,7 @@ const path = require('node:path');
       for (const status of ['BACKLOG', 'OPEN', 'WAIT', 'IN PROGRESS', 'REVIEW', 'DONE', 'ARCHIVE']) {
         if (!standalone && status === 'ARCHIVE') continue;
         await open(status, standalone);
+        assert.equal(await page.locator('#stop-task').isVisible(), status === 'IN PROGRESS');
         for (const id of ['reopen-task', 'done-task']) assert.equal(await page.locator(`#${id}`).isVisible(), status === 'REVIEW');
       }
       for (const [id, destination] of [['reopen-task', 'OPEN'], ['done-task', 'DONE']]) {
@@ -95,6 +96,7 @@ const path = require('node:path');
     await page.waitForFunction(() => document.querySelector('#task-mode').value === 'create');
     assert.equal(await page.locator('#reopen-task').isVisible(), false);
     assert.equal(await page.locator('#done-task').isVisible(), false);
+    assert.equal(await page.locator('#stop-task').isVisible(), false);
     assert.deepEqual(errors, []);
     console.log('PASS: REVIEW buttons visibility, OPEN/DONE transitions, spinner, duplicate prevention, errors, creation and both templates.');
   } finally {

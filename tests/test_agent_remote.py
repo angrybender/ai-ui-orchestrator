@@ -3,6 +3,7 @@ import io
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -107,9 +108,21 @@ class FakeSFTP:
     def lstat(self, path):
         import stat
         from types import SimpleNamespace
+        if path in self.files:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o644)
         if path not in self.dirs:
             raise FileNotFoundError(path)
         return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755)
+
+    def listdir_attr(self, path):
+        from types import SimpleNamespace
+        import posixpath
+        return [SimpleNamespace(filename=posixpath.basename(item))
+                for item in self.files.keys() | self.dirs
+                if posixpath.dirname(item) == path]
+
+    def remove(self, path):
+        del self.files[path]
 
     def putfo(self, source, path):
         assert isinstance(source, io.BytesIO)
@@ -267,6 +280,119 @@ def test_bad_task_id_before_connect(setup, task_id):
     with pytest.raises(remote.RemoteAgentError):
         run()
     assert ssh.connect_args is None
+
+
+@pytest.mark.parametrize("diagnostic", [
+    "Session not found: saved-session", "Session saved-session not found",
+    "Session does not exist", "Unknown session: saved-session",
+    "Session 'saved-session' does not exist",
+])
+@pytest.mark.parametrize("comment", [None, "Continue with the requested fix"])
+def test_missing_session_creates_new_session(setup, diagnostic, comment):
+    ssh, config, task, logs, sessions, run = setup
+    task.update(session_id="saved-session", comment=comment)
+    config['agent.continue_session_arg'] = '--continue'
+    ssh.sftp.dirs.update({"/tasks/PRJ-12", "/tasks/PRJ-12/requirements-PRJ-12"})
+    ssh.sftp.files['/tasks/PRJ-12/requirements-PRJ-12/TASK.md'] = b'original context'
+    ssh.channel.messages = [reply(1, {"protocolVersion": 1}),
+        {"jsonrpc": "2.0", "id": 2, "error": {
+            "code": -32603, "message": "Internal error", "data": {"details": diagnostic}}},
+        reply(3, {"sessionId": "replacement-session"}), reply(4, {"stopReason": "end_turn"})]
+    assert run() == {"sessionId": "replacement-session", "stopReason": "end_turn"}
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert [r['method'] for r in requests] == ['initialize', 'session/load', 'session/new', 'session/prompt']
+    assert [r['id'] for r in requests] == [1, 2, 3, 4]
+    expected = remote.task_prompt(task['task_id']) + ('\n\n' + comment if comment else '')
+    assert requests[-1]['params'] == {'sessionId': 'replacement-session', 'prompt': [{'type': 'text', 'text': expected}]}
+    assert sessions == ['replacement-session']
+    assert set(ssh.sftp.files) == {'/tasks/PRJ-12/requirements-PRJ-12/TASK.md'}
+    assert task['description'].encode() in ssh.sftp.files['/tasks/PRJ-12/requirements-PRJ-12/TASK.md']
+    assert 'creating a new session' in logs[0]
+    assert ssh.events.count('exec') == 1
+
+
+@pytest.mark.parametrize('message,response_id', [
+    ('Permission denied', 2), ('Session temporarily unavailable', 2),
+    ('Method not found', 2), ('Session file not found: configuration.json', 2),
+    ('Session not found', 99),
+])
+def test_load_errors_do_not_create_replacement(setup, message, response_id):
+    ssh, _, task, _, sessions, run = setup
+    task['session_id'] = 'saved-session'
+    ssh.sftp.dirs.update({'/tasks/PRJ-12', '/tasks/PRJ-12/requirements-PRJ-12'})
+    ssh.channel.messages[1] = {'jsonrpc': '2.0', 'id': response_id,
+                               'error': {'code': -32603, 'message': message}}
+    with pytest.raises(remote.RemoteAgentError):
+        run()
+    assert sessions == []
+    assert [json.loads(line)['method'] for line in ssh.channel.stdin.getvalue().splitlines()] == ['initialize', 'session/load']
+
+
+@pytest.mark.parametrize('replacement', [
+    reply(3, {'sessionId': ''}),
+    {'jsonrpc': '2.0', 'id': 3, 'error': {'code': -32603, 'message': 'Session not found'}},
+])
+def test_failed_replacement_is_not_retried(setup, replacement):
+    ssh, _, task, _, sessions, run = setup
+    task['session_id'] = 'saved-session'
+    ssh.sftp.dirs.update({'/tasks/PRJ-12', '/tasks/PRJ-12/requirements-PRJ-12'})
+    ssh.channel.messages[1:] = [
+        {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}}, replacement]
+    with pytest.raises(remote.RemoteAgentError, match='session/new'):
+        run()
+    assert sessions == []
+    assert len(ssh.channel.stdin.getvalue().splitlines()) == 3
+
+
+def test_backlog_edits_then_missing_session_recovery_persisted(setup, monkeypatch):
+    import agent_store
+    import agent_worker
+    import board_store
+
+    ssh, config, _, _, _, _ = setup
+    monkeypatch.setattr(agent_worker.Config, 'get', staticmethod(config.get))
+    board_store.init_database()
+    agent_store.init_database()
+    board_store.create_task('PRJ-12', 'Initial', 'Initial description', [])
+    for n in range(4):
+        board_store.update_task('PRJ-12', f'Title {n}', f'Description {n}', 'BACKLOG', [], [])
+    with board_store.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM agent_runs').fetchone()[0] == 0
+    board_store.move_task('PRJ-12', 'OPEN', 0)
+    assert agent_worker.execute() == 0
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert [r['method'] for r in requests] == ['initialize', 'session/new', 'session/prompt']
+    original_files = dict(ssh.sftp.files)
+    assert b'Description 3' in next(iter(original_files.values()))
+
+    board_store.add_user_comment('PRJ-12', 'Continue the work')
+    ssh.channel = FakeChannel(ssh)
+    ssh.channel.messages = [reply(1, {'protocolVersion': 1}),
+        {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}},
+        reply(3, {'sessionId': 'replacement-session'}), update('Completed after recovery'),
+        reply(4, {'stopReason': 'end_turn'})]
+    original_session = agent_store.session
+
+    def persist(run_id, session_id):
+        task = board_store.get_task('PRJ-12')
+        assert task['status'] == 'IN PROGRESS' and not task['is_error']
+        original_session(run_id, session_id)
+
+    monkeypatch.setattr(agent_store, 'session', persist)
+    assert agent_worker.execute() == 0
+    task = board_store.get_task('PRJ-12')
+    assert task['status'] == 'REVIEW' and not task['is_error']
+    assert ssh.sftp.files == original_files
+    with board_store.connect() as db:
+        runs = db.execute('SELECT * FROM agent_runs ORDER BY created_at').fetchall()
+    assert len(runs) == 2
+    assert runs[-1]['session_id'] == 'replacement-session'
+    assert runs[-1]['state'] == 'SUCCEEDED' and not runs[-1]['error']
+    assert [m['text'] for m in board_store.get_chat('PRJ-12')['messages']] == ['Continue the work', 'Completed after recovery']
+    board_store.add_user_comment('PRJ-12', 'Verify once more')
+    next_run = agent_store.claim(60)
+    assert next_run['session_id'] == 'replacement-session'
+    agent_store.finish(next_run['id'], stop_reason='end_turn')
 
 
 @pytest.mark.parametrize("key,value", [("remote_server.host", "host:99999"), ("remote_server.username", ""),
@@ -432,12 +558,34 @@ def test_internal_failure_preserves_safe_diagnostic(setup):
     assert logs and "session/new: ValueError: Missing, invalid or unsafe sessionId" in logs[0]
 
 
-def test_secret_session_id_rejected_without_callback(setup):
+@pytest.mark.parametrize('session_id', ['secret-password', 'id-secret-password-tail'])
+def test_secret_session_id_rejected_without_callback(setup, session_id):
     ssh, _, _, _, sessions, run = setup
-    ssh.channel.messages[1] = reply(2, {"sessionId": "secret-password"})
+    ssh.channel.messages[1] = reply(2, {"sessionId": session_id})
     with pytest.raises(remote.RemoteAgentError):
         run()
     assert sessions == []
+
+
+@pytest.mark.parametrize('suffix', ['a', 'ab', 'abc', '-'])
+@pytest.mark.parametrize('recover', [False, True])
+def test_complete_session_id_accepts_partial_secret_suffix(setup, suffix, recover):
+    ssh, config, task, _, sessions, run = setup
+    config['remote_server.password'] = 'abcdef-secret'
+    session_id = '12345678-1234-1234-1234-123456789' + suffix
+    if recover:
+        task['session_id'] = 'saved-session'
+        ssh.sftp.dirs.update({'/tasks/PRJ-12', '/tasks/PRJ-12/requirements-PRJ-12'})
+        ssh.channel.messages[1:] = [
+            {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}},
+            reply(3, {'sessionId': session_id}), reply(4, {'stopReason': 'end_turn'})]
+    else:
+        ssh.channel.messages[1] = reply(2, {'sessionId': session_id})
+    assert run() == {'sessionId': session_id, 'stopReason': 'end_turn'}
+    assert sessions == [session_id]
+    requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
+    assert requests[-1]['method'] == 'session/prompt'
+    assert requests[-1]['params']['sessionId'] == session_id
 
 
 def test_empty_attachments_and_default_port(setup):
@@ -481,7 +629,8 @@ def test_attachment_upload_failure_does_not_start(setup, tmp_path, monkeypatch):
     with pytest.raises(remote.RemoteAgentError):
         run([(local, "file.txt")])
     assert ssh.channel.command is None
-    assert "/tasks/PRJ-12/requirements-PRJ-12/TASK.md" in ssh.sftp.files
+    # The description is published only after attachments finish uploading.
+    assert "/tasks/PRJ-12/requirements-PRJ-12/TASK.md" not in ssh.sftp.files
 
 
 @pytest.mark.parametrize("stderr", [b"", b"Internal error: Connection error.\n"])
@@ -517,3 +666,55 @@ def test_worker_persists_acp_error_in_log_status_and_chat(setup, monkeypatch, st
     assert b'"details": "Connection error."' in raw.getvalue()
     if stderr:
         assert b"ERR " + stderr in raw.getvalue()
+
+
+def test_resume_mirrors_changed_added_and_deleted_attachments(setup, tmp_path):
+    ssh, config, task, _, _, run = setup
+    root = '/tasks/PRJ-12'
+    context = root + '/requirements-PRJ-12/'
+    ssh.sftp.dirs.update({root, context.rstrip('/')})
+    ssh.sftp.files.update({context + 'TASK.md': b'old description',
+                           context + 'removed.txt': b'obsolete',
+                           context + 'changed.txt': b'old bytes',
+                           root + '/result.txt': b'agent output'})
+    task.update(session_id='saved-session', description='New description')
+    ssh.channel.messages[1] = reply(2, {})
+    changed = tmp_path / 'changed.txt'
+    changed.write_bytes(b'updated bytes')
+    added = tmp_path / 'added.txt'
+    added.write_bytes(b'new bytes')
+    # Capture actual uploaded bytes rather than the shared fake's local paths.
+    ssh.sftp.put = lambda local, target: ssh.sftp.files.__setitem__(target, Path(local).read_bytes())
+    assert run([(changed, 'changed.txt'), (added, 'added.txt')])['stopReason'] == 'end_turn'
+    assert ssh.sftp.files[context + 'changed.txt'] == b'updated bytes'
+    assert ssh.sftp.files[context + 'added.txt'] == b'new bytes'
+    assert context + 'removed.txt' not in ssh.sftp.files
+    assert ssh.sftp.files[root + '/result.txt'] == b'agent output'
+    assert b'New description' in ssh.sftp.files[context + 'TASK.md']
+    assert b'removed.txt' not in ssh.sftp.files[context + 'TASK.md']
+
+
+@pytest.mark.parametrize('failure', ['upload', 'remove', 'symlink', 'directory'])
+def test_resume_sync_failure_prevents_agent(setup, monkeypatch, failure):
+    import stat
+    from types import SimpleNamespace
+    ssh, _, task, _, _, run = setup
+    root = '/tasks/PRJ-12'
+    context = root + '/requirements-PRJ-12'
+    ssh.sftp.dirs.update({root, context})
+    ssh.sftp.files[context + '/TASK.md'] = b'old context'
+    task['session_id'] = 'saved-session'
+    if failure == 'upload':
+        ssh.sftp.fail_upload = True
+    elif failure == 'remove':
+        def fail_remove(path):
+            raise OSError('Removal failed')
+        monkeypatch.setattr(ssh.sftp, 'remove', fail_remove)
+    else:
+        original = ssh.sftp.lstat
+        monkeypatch.setattr(ssh.sftp, 'lstat', lambda path: SimpleNamespace(
+            st_mode=stat.S_IFLNK if failure == 'symlink' else stat.S_IFDIR)
+            if path.endswith('/TASK.md') else original(path))
+    with pytest.raises(remote.RemoteAgentError):
+        run()
+    assert ssh.channel.command is None

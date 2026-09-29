@@ -61,3 +61,21 @@ def test_chat_preserves_last_response_of_each_run():
             ('agent', 'Second final response'),
             ('agent', 'Restart response'),
         ]
+
+
+def test_backlog_comment_waits_for_explicit_open():
+    with TestClient(main.app) as client:
+        board_store.create_task('CHAT-1', 'Chat', 'Details', [])
+        for comment in ['First instruction', 'Latest instruction']:
+            response = client.post('/api/board/tasks/CHAT-1/chat', json={'comment': comment})
+            assert response.status_code == 200
+            assert response.json()['status'] == 'BACKLOG'
+            assert response.json()['messages'][-1]['text'] == comment
+            assert agent_store.claim(60) is None
+        assert client.post('/api/board/tasks/CHAT-1/chat', json={'comment': ' '}).status_code == 422
+        assert client.patch('/api/board/tasks/CHAT-1/move', json={'status': 'OPEN', 'position': 0}).status_code == 200
+        assert client.post('/api/board/tasks/CHAT-1/chat', json={'comment': 'Too late'}).status_code == 409
+        run = agent_store.claim(60)
+        assert run['comment'] == 'Latest instruction'
+        assert len(board_store.get_chat('CHAT-1')['messages']) == 2
+        agent_store.finish(run['id'], 'Test cleanup')

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -49,7 +49,7 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 def init_database() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DATABASE_PATH) as connection:
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection, connection:
         connection.execute("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         connection.execute("INSERT OR IGNORE INTO app_meta(key, value) VALUES ('schema_version', '1')")
     import board_store

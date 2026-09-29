@@ -1,7 +1,6 @@
 """SSH/SFTP ACP transport; persistence and process ownership belong to the caller."""
 from __future__ import annotations
 
-import io
 import json
 import math
 from pathlib import Path
@@ -16,7 +15,7 @@ from typing import Callable
 
 import paramiko
 from task_init import InitError, run_init
-from task_context import prepare_directory, task_prompt
+from task_context import prepare_directory, task_prompt, sync_context
 from agent_control import AgentControl, CANCEL_TIMEOUT, POLL_INTERVAL
 
 CONNECT_TIMEOUT = 20
@@ -46,8 +45,18 @@ class RemoteAgentError(RuntimeError):
 
 
 class ACPError(RuntimeError):
-    def __init__(self, message: str):
+    def __init__(self, message: str, *, session_missing=False):
         super().__init__(message)
+        self.session_missing = session_missing
+
+
+def _session_missing(parts, session_id):
+    """Only explicit missing-session diagnostics permit a fresh session."""
+    return any(re.search(
+        r"\bsession(?:\s+['\"]?" + re.escape(session_id) + r"['\"]?)?\s+(?:was\s+|is\s+)?"
+        r"(?:not\s+found|does\s+not\s+exist|doesn't\s+exist)\b"
+        r"|\b(?:unknown|nonexistent|non-existent)\s+session\b",
+        part, re.IGNORECASE) for part in parts)
 
 
 def _name(value: str) -> bool:
@@ -141,19 +150,22 @@ class _Diagnostics:
                 self.secrets.update(lines)
                 self.secrets.add("".join(lines))
 
-    def safe(self, text):
+    def safe(self, text, *, partial_suffix=True):
+        """Mask incomplete suffixes only for potentially truncated stream text."""
         # Include unterminated PEM blocks and a truncated opening marker.
         text = re.sub(r"-----BEGIN [^\r\n]*PRIVATE KEY-----.*?(?:-----END [^\r\n]*PRIVATE KEY-----|\Z)",
                       "[REDACTED]", text, flags=re.S)
         text = re.sub(r"-----BEGIN [^\r\n]*(?:\Z)", "[REDACTED]", text)
         for secret in sorted(self.secrets, key=len, reverse=True):
             text = text.replace(secret, "[REDACTED]")
+            if not partial_suffix:
+                continue
             # Preserve diagnostics on failure without leaking a final partial secret.
             for size in range(min(len(secret) - 1, len(text)), 0, -1):
                 if text.endswith(secret[:size]):
                     text = text[:-size] + "[REDACTED]"
                     break
-        for size in range(min(len("-----BEGIN "), len(text)), 0, -1):
+        for size in range(min(len("-----BEGIN "), len(text)) if partial_suffix else 0, 0, -1):
             if text.endswith("-----BEGIN "[:size]):
                 text = text[:-size] + "[REDACTED]"
                 break
@@ -239,6 +251,8 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
             raise ValueError
         if "error" in message:
+            if type(message.get("id")) is not int or message["id"] != request_id:
+                raise ValueError
             error = message.get("error")
             if isinstance(error, dict):
                 message_text = error.get("message")
@@ -246,7 +260,9 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
                 details = data.get("details") if isinstance(data, dict) else None
                 parts = [value.strip() for value in (message_text, details)
                          if isinstance(value, str) and value.strip()]
-                raise ACPError(f"{method}: {': '.join(parts)}" if parts else f"{method}: ACP request failed")
+                raise ACPError(
+                    f"{method}: {': '.join(parts)}" if parts else f"{method}: ACP request failed",
+                    session_missing=method == "session/load" and _session_missing(parts, params.get('sessionId', '')))
             raise ValueError
         if "method" in message:
             if not isinstance(message["method"], str) or "result" in message:
@@ -260,15 +276,6 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
                 _event(message, diagnostics, on_message, raw_log)
             continue
         if type(message.get("id")) is not int or message["id"] != request_id:
-            raise ValueError
-        if "error" in message:
-            error = message.get("error")
-            if isinstance(error, dict) and isinstance(error.get("message"), str):
-                details = error.get("data", {}).get("details") if isinstance(error.get("data"), dict) else None
-                text = error["message"]
-                if isinstance(details, str) and details.strip():
-                    text = f"{text}: {details}"
-                raise ACPError(text)
             raise ValueError
         if not isinstance(message.get("result"), dict):
             raise ValueError
@@ -337,10 +344,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             raise ValueError
         resume = cycle.reuse(cwd) if cycle else bool(task.get("session_id"))
         context_dir = prepare_directory(sftp, cwd, task['task_id'], resume)
-        if not resume:
-            sftp.putfo(io.BytesIO(text.encode("utf-8")), posixpath.join(context_dir, "TASK.md"))
-            for local, name in names:
-                sftp.put(str(local), posixpath.join(context_dir, name))
+        sync_context(sftp, context_dir, text, names, resume,
+                     cycle.check if cycle else lambda: None)
         if cycle:
             cycle.prepared(cwd)
             cycle.check()
@@ -411,24 +416,39 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
                 stage = "session/load" if task.get("session_id") else "session/new"
+                request_id = 2
+                session_id = None
+                session_prompt = prompt
                 if task.get("session_id"):
                     session_id = task.get("session_id")
                     if not isinstance(session_id, str) or not session_id.strip():
                         raise ACPError("session/load: missing saved session id")
-                    session = _request(stdin, stdout, 2, "session/load", {
-                        "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
-                else:
-                    session = _request(stdin, stdout, 2, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
+                    try:
+                        _request(stdin, stdout, request_id, "session/load", {
+                            "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
+                    except ACPError as exception:
+                        if not exception.session_missing:
+                            raise
+                        diagnostics.append("exception", "Saved ACP session not found; creating a new session.\n")
+                        session_id = None
+                        request_id += 1
+                        session_prompt = task_prompt(task['task_id'])
+                        if task.get('comment'):
+                            session_prompt += '\n\n' + task['comment']
+                if session_id is None:
+                    stage = "session/new"
+                    session = _request(stdin, stdout, request_id, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
                     session_id = session.get("sessionId")
-                    if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id) != session_id:
+                    # A parsed JSON field is complete, unlike ACP/stderr chunks.
+                    if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id, partial_suffix=False) != session_id:
                         raise ValueError("Missing, invalid or unsafe sessionId")
                 if cancelled.is_set():
                     return
                 stage = "persist sessionId"
                 on_session(session_id)
                 stage = "session/prompt"
-                result = _request(stdin, stdout, 3, "session/prompt", {
-                    "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}, diagnostics, cancelled, on_message, raw_log, control.send)
+                result = _request(stdin, stdout, request_id + 1, "session/prompt", {
+                    "sessionId": session_id, "prompt": [{"type": "text", "text": session_prompt}]}, diagnostics, cancelled, on_message, raw_log, control.send)
                 reason = result.get("stopReason")
                 if reason == 'cancelled' and control.requested.is_set():
                     outcome.update(sessionId=session_id, stopReason=reason)

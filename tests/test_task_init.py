@@ -239,7 +239,7 @@ def test_save_path_checks_regular_file_only(monkeypatch, missing):
     assert not any(x[0] == 'exec_command' for x in calls)
 
 
-def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monkeypatch):
+def test_full_cycle_retry_then_reopen_syncs_context_and_preserves_history(setup, monkeypatch):
     ssh, config, task, _, _, _ = setup
     config.update({'tasks.init_script_text': 'exit 2', 'tasks.init_script_timeout': 300, 'agent.continue_session_arg': '--continue'})
     monkeypatch.setattr(Config, 'get', staticmethod(config.get))
@@ -264,9 +264,14 @@ def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monke
     assert initial['messages'][0]['role'] == 'system'
     assert initial['messages'][0]['run_id']
     config['tasks.init_script_text'] = 'echo fixed'
+    board_store.update_task(task['task_id'], 'Updated title', 'Updated after WAIT', 'WAIT', [],
+                            [('new.txt', 'text/plain', b'new attachment')])
     board_store.add_user_comment(task['task_id'], 'Please retry')
     assert agent_worker.execute() == 0
-    assert ssh.sftp.files == original_files
+    context = '/tasks/PRJ-12/requirements-PRJ-12/'
+    assert b'Updated after WAIT' in ssh.sftp.files[context + 'TASK.md']
+    assert context + 'new.txt' in ssh.sftp.files
+    assert ssh.sftp.files != original_files
     requests = [json.loads(line) for line in ssh.channel.stdin.getvalue().splitlines()]
     assert requests[1]['method'] == 'session/new'
     assert 'TASK.md' in requests[2]['params']['prompt'][0]['text']
@@ -274,9 +279,14 @@ def test_full_cycle_retry_then_reopen_preserves_context_and_history(setup, monke
     assert '--continue' not in ssh.channel.command
     assert board_store.get_chat(task['task_id'])['messages'][0] == initial['messages'][0]
     assert calls == ['exit 2', 'echo fixed']
+    saved = board_store.get_task(task['task_id'])
+    board_store.update_task(task['task_id'], 'Reopened title', 'Updated after REVIEW', 'REVIEW',
+                            [item['id'] for item in saved['attachments']], [])
     board_store.move_task(task['task_id'], 'OPEN', 0)
     ssh.channel.messages[1] = reply(2, {})  # session/load response
     assert agent_worker.execute() == 0
+    assert b'Updated after REVIEW' in ssh.sftp.files[context + 'TASK.md']
+    assert context + 'new.txt' not in ssh.sftp.files
     assert calls == ['exit 2', 'echo fixed']
     assert shlex.split(ssh.channel.command.split('bash -c ', 1)[1])[0].endswith('--continue')
 

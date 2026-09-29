@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import logging
 import subprocess
 import sys
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def launch() -> int | None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         active = connection.execute(f'SELECT * FROM agent_runs WHERE {agent_store.ACTIVE}').fetchone()
         if active:

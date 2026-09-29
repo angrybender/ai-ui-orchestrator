@@ -136,7 +136,8 @@ class Harness:
         self.ssh = LocalSSH()
         monkeypatch.setattr(agent_remote.paramiko, 'SSHClient', lambda: self.ssh)
         monkeypatch.setattr(agent_remote, '_open_raw_log', lambda _: io.BytesIO())
-        monkeypatch.setattr(agent_worker.Config, 'get', staticmethod(self.config.get))
+        from types import SimpleNamespace
+        monkeypatch.setattr(agent_worker, 'Config', SimpleNamespace(get=self.config.get))
         board_store.init_database()
         agent_store.init_database()
         board_store.create_task('CANCEL-1', 'Cancel a running agent', 'Exercise explicit ACP cancellation', [])

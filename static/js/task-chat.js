@@ -95,7 +95,7 @@
       lastContent = content;
       messages.scrollTop = scrollTop;
     }
-    composer.hidden = !["REVIEW", "WAIT"].includes(data.status);
+    composer.hidden = !["BACKLOG", "REVIEW", "WAIT"].includes(data.status);
     panel.hidden = !data.messages.length && composer.hidden;
     document.querySelector(".task-dialog").classList.toggle("has-chat", !panel.hidden);
     document.querySelector(".task-page-editor")?.classList.toggle("has-chat", !panel.hidden);
