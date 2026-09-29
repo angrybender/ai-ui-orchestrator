@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import os
 import logging
 import signal
@@ -21,7 +22,7 @@ def confirm_remote_stop(run_id: str) -> None:
     This deliberately does not infer termination from DONE, elapsed time, or
     the executor's death. Never call it automatically from claim/recover.
     """
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute('SELECT * FROM agent_runs WHERE id = ?', (run_id,)).fetchone()
         if row is None:
@@ -39,7 +40,7 @@ def confirm_remote_stop(run_id: str) -> None:
 
 
 def init_database() -> None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.executescript("""
             CREATE TABLE IF NOT EXISTS agent_runs (
                 id TEXT PRIMARY KEY,
@@ -93,13 +94,13 @@ def process_identity(pid: int) -> str | None:
 
 
 def active_run() -> dict | None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         row = connection.execute(f'SELECT * FROM agent_runs WHERE {ACTIVE}').fetchone()
         return dict(row) if row else None
 
 
 def finish(run_id: str, error: str | None = None, stop_reason: str | None = None, *, init_error=False, uncertain=False, agent_uncertain=False) -> None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute(f'SELECT * FROM agent_runs WHERE id = ? AND {ACTIVE}', (run_id,)).fetchone()
         if row is None:
@@ -223,7 +224,7 @@ def recover() -> None:
 
 def claim(timeout: float) -> dict | None:
     recover()
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         if connection.execute(f'SELECT 1 FROM agent_runs WHERE {ACTIVE}').fetchone():
             return None
@@ -264,7 +265,7 @@ def claim(timeout: float) -> dict | None:
 
 def message(run_id: str, text: str) -> None:
     """Replace this run's already sanitized agent response, never its diagnostics."""
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute(f'SELECT task_pk FROM agent_runs WHERE id = ? AND {ACTIVE} AND EXISTS (SELECT 1 FROM board_tasks WHERE id = task_pk AND active_run_id = agent_runs.id)', (run_id,)).fetchone()
         if row is None or row['task_pk'] is None:
@@ -284,15 +285,15 @@ def message(run_id: str, text: str) -> None:
 
 
 def started(run_id: str) -> None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute(f"UPDATE agent_runs SET state = 'RUNNING', started_at = ? WHERE id = ? AND {ACTIVE}", (time.time(), run_id))
 
 
 def session(run_id: str, session_id: str) -> None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute(f'UPDATE agent_runs SET session_id = ? WHERE id = ? AND {ACTIVE}', (session_id, run_id))
 
 
 def append_log(run_id: str, text: str) -> None:
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         connection.execute(f'UPDATE agent_runs SET log = log || ? WHERE id = ? AND {ACTIVE}', (text, run_id))

@@ -1,3 +1,5 @@
+from contextlib import closing
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -10,7 +12,7 @@ router = APIRouter()
 
 @router.get('/api/agent/recovery')
 def recovery_candidates():
-    with board_store.connect() as connection:
+    with closing(board_store.connect()) as connection, connection:
         rows = connection.execute(
             "SELECT r.id AS run_id, t.task_id FROM agent_runs r LEFT JOIN board_tasks t ON t.id = r.task_pk "
             "WHERE r.agent_uncertain = 1 AND r.state NOT IN ('PREPARING', 'RUNNING') ORDER BY r.created_at, r.id"
