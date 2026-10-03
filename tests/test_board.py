@@ -268,3 +268,24 @@ def test_mutations_lock_before_reading_order_or_status(monkeypatch, operation):
     assert attempts
     assert not failures, failures
     assert board_store.get_task("RACE-1")["status"] == "OPEN"
+
+
+@pytest.mark.parametrize("task_id", ["../task", "A/B", "A\\B", ".", "..", "A.B", "A:B", "A*B", "A?B", 'A"B', "A<B", "A>B", "A|B", "A B", "A\nB", "A\x00B", "A%2fB", "ЗАДАЧА-1"])
+@pytest.mark.parametrize("multipart", [False, True])
+def test_creation_rejects_unsafe_task_id(task_id, multipart):
+    with TestClient(main.app) as client:
+        payload = {"task_id": task_id, "title": "Task", "description": "Details"}
+        options = {"data": payload, "files": {"files": ("note.txt", b"content")}} if multipart else {"json": payload}
+        response = client.post("/api/board/tasks", **options)
+        assert response.status_code == 422
+        assert "task_id" in response.json()["detail"]
+        assert board_store.list_tasks() == []
+        assert not list(board_store.FILES_DIR.rglob("*"))
+
+
+@pytest.mark.parametrize("task_id", ["PRJ-12", "project_12", "123", "  Prj_12-3  "])
+def test_creation_accepts_safe_task_id(task_id):
+    with TestClient(main.app) as client:
+        response = client.post("/api/board/tasks", json={"task_id": task_id, "title": "Task", "description": "Details"})
+        assert response.status_code == 201
+        assert response.json()["task_id"] == task_id.strip()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from contextlib import closing
@@ -337,6 +338,8 @@ def create_task(task_id: str, title: str, description: str, files: list[tuple[st
     errors = _validate(task_id, title, description)
     if errors:
         raise BoardError(errors)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id.strip()):
+        raise BoardError({"task_id": "Task ID may contain only letters A-Z, numbers, hyphens and underscores"})
     written: list[Path] = []
     try:
         with closing(connect()) as connection, connection:

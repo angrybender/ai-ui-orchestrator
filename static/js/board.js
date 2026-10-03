@@ -347,6 +347,11 @@
       const description = $("#task-description");
       const status = $("#task-status");
       if (!taskId || !title || !description || !status) return;
+      if (!editing && !/^[A-Za-z0-9_-]+$/.test(taskId.value.trim())) {
+        showErrors({ task_id: taskId.value.trim() ? "Task ID may contain only letters A-Z, numbers, hyphens and underscores" : "Task ID is required" });
+        return;
+      }
+      clearErrors();
       const url = editing ? `/api/board/tasks/${encodeURIComponent(editing.task_id)}` : "/api/board/tasks";
       let request;
       if (selectedFiles.length) {
