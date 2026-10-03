@@ -27,7 +27,7 @@
     document.querySelectorAll(".field-error").forEach((element) => { element.textContent = ""; });
   }
 
-  function showErrors(detail) {
+  function showErrors(detail, notify = true) {
     clearErrors();
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       Object.keys(detail).forEach((key) => {
@@ -35,7 +35,7 @@
         if (error) error.textContent = detail[key];
       });
     }
-    window.showToast("Please check the form", { type: "error" });
+    if (notify) window.showToast("Please check the form", { type: "error" });
   }
 
   function receiveTasks(snapshot) {
@@ -264,7 +264,7 @@
         closeForm();
       }
       window.showToast(`Task moved to ${destination}`);
-    } catch (error) { window.showToast(error.message || "Unable to move task", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to move task", { type: "error" }); }
     finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -288,7 +288,7 @@
       tasks = (await response.json()).tasks;
       render();
       window.showToast("Task archived");
-    } catch (error) { window.showToast(error.message || "Unable to archive task", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to archive task", { type: "error" }); }
     finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -310,7 +310,7 @@
       render();
       closeForm();
       window.showToast("Task deleted");
-    } catch (error) { window.showToast(error.message || "Unable to delete task", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to delete task", { type: "error" }); }
     finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -330,7 +330,7 @@
         const task = tasks.find((item) => item.task_id === window.openTaskId);
         if (task) openForm(task);
       }
-    } catch (error) { window.showToast(error.message || "Unable to load tasks", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to load tasks", { type: "error" }); }
   }
 
   async function save(event, stop = false) {
@@ -382,7 +382,7 @@
       if (stop && !window.openTaskId) openForm(tasks.find(task => task.task_id === stoppedId));
       window.showToast(stop ? "Task stopped" : "Task saved");
     } catch (error) {
-      if (error.detail) showErrors(error.detail); else window.showToast(error.message || "Unable to save task", { type: "error" });
+      if (error.detail) showErrors(error.detail, !error.reported); else if (!error.reported) window.showToast(error.message || "Unable to save task", { type: "error" });
     } finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -399,7 +399,7 @@
       if (!response.ok) return await apiError(response);
       tasks = (await response.json()).tasks;
       render();
-    } catch (error) { window.showToast(error.message || "Unable to move task", { type: "error" }); render(); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to move task", { type: "error" }); render(); }
   }
 
   function getDragAfterElement(container, y) {
@@ -443,7 +443,7 @@
         if (form.dataset.spinnerActive === "true") return;
         openForm(null);
         $("#task-id").value = data.task_id;
-      } catch (error) { window.showToast(error.message || "Unable to generate task ID", { type: "error" }); }
+      } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to generate task ID", { type: "error" }); }
     });
     $("#close-task")?.addEventListener("click", requestCloseForm);
     $("#cancel-task")?.addEventListener("click", requestCloseForm);

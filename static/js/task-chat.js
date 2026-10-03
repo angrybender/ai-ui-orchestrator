@@ -135,7 +135,7 @@
     } catch (error) {
       if (token === generation && error.name !== "AbortError" && !failed) {
         failed = true;
-        window.showToast("Unable to load comments; retrying", { type: "error" });
+        if (!error.reported) window.showToast("Unable to load comments; retrying", { type: "error" });
       }
     } finally {
       if (token === generation && current) timer = setTimeout(() => poll(token), 500);
@@ -168,7 +168,11 @@
         window.showToast("Comment sent");
       }
     } catch (error) {
-      window.showToast("Unable to send comment", { type: "error" });
+      const detail = error.detail;
+      if (detail && typeof detail === "object" && (detail.comment || detail.comments)) {
+        panel.querySelector("#chat-error").textContent = String(detail.comment || detail.comments);
+      }
+      if (!error.reported) window.showToast("Unable to send comment", { type: "error" });
     } finally {
       if (window.spinner) window.spinner.stop(button);
       applyPending();

@@ -32,7 +32,7 @@ const path = require('node:path');
       await page.setContent('<div id="board"><div class="task-list" data-status="DONE"></div></div><button id="new-task-button">New task</button>' + source.slice(start, source.indexOf('{% endblock %}', start)));
       for (const name of ['app', 'board']) await page.addStyleTag({ path: path.join(root, `static/css/${name}.css`) });
       await page.evaluate(() => { window.messages = []; window.showToast = (text, options) => window.messages.push({ text, options }); });
-      for (const name of ['spinner', 'board']) await page.addScriptTag({ path: path.join(root, `static/js/${name}.js`) });
+      for (const name of ['api-errors', 'spinner', 'board']) await page.addScriptTag({ path: path.join(root, `static/js/${name}.js`) });
       await page.evaluate(() => document.dispatchEvent(new Event('DOMContentLoaded')));
     }
     await open();

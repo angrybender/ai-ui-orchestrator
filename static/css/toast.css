@@ -19,6 +19,7 @@
   font-size: 13px;
   font-weight: 650;
   line-height: 1.4;
+  overflow-wrap: anywhere;
   opacity: 0;
   transform: translateY(12px);
   transition: opacity .18s ease, transform .18s ease;

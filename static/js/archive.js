@@ -6,7 +6,7 @@
   let page = 1;
 
   function showError(error) {
-    window.showToast(error.message || "Unable to load archive", { type: "error" });
+    if (!error.reported) window.showToast(error.message || "Unable to load archive", { type: "error" });
   }
 
   function render(data) {
