@@ -37,7 +37,7 @@
         ? `Agent recovered. Remaining blocked runs: ${result.data.remaining}`
         : "Agent recovered. Queue unblocked.");
     } catch (error) {
-      window.showToast("Unable to recover agent. Please try again.", { type: "error" });
+      if (!error.reported) window.showToast("Unable to recover agent. Please try again.", { type: "error" });
     } finally {
       window.spinner.stop(button);
       busy = false;

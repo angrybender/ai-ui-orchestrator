@@ -90,7 +90,7 @@
         window.showToast(detail || 'Could not save HTTP proxy configuration', {type: 'error'});
       }
     } catch (error) {
-      window.showToast('Could not save HTTP proxy configuration', {type: 'error'});
+      if (!error.reported) window.showToast('Could not save HTTP proxy configuration', {type: 'error'});
     } finally {
       window.spinner.stop(button);
     }

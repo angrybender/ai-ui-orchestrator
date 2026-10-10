@@ -21,7 +21,7 @@ form.addEventListener('submit', async (event) => {
         window.showToast('Saved successfully');
       }
     } catch (error) {
-      window.showToast(error.message, {type: 'error'});
+      if (!error.reported) window.showToast(error.message, {type: 'error'});
     } finally {
       window.spinner.stop(button);
     }

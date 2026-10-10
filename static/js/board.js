@@ -2,7 +2,7 @@
   "use strict";
 
   const statuses = ["BACKLOG", "OPEN", "WAIT", "IN PROGRESS", "REVIEW", "DONE"];
-  const transitions = { "BACKLOG": ["OPEN", "ARCHIVE"], "WAIT": ["ARCHIVE"], "IN PROGRESS": ["BACKLOG"], "REVIEW": ["OPEN", "BACKLOG", "DONE"], "DONE": ["ARCHIVE"] };
+  const transitions = { "BACKLOG": ["OPEN", "ARCHIVE"], "OPEN": ["BACKLOG"], "WAIT": ["ARCHIVE"], "IN PROGRESS": ["BACKLOG"], "REVIEW": ["OPEN", "BACKLOG", "DONE"], "DONE": ["ARCHIVE"] };
   let tasks = [];
   let editing = null;
   let removedAttachments = [];
@@ -27,7 +27,7 @@
     document.querySelectorAll(".field-error").forEach((element) => { element.textContent = ""; });
   }
 
-  function showErrors(detail) {
+  function showErrors(detail, notify = true) {
     clearErrors();
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       Object.keys(detail).forEach((key) => {
@@ -35,7 +35,7 @@
         if (error) error.textContent = detail[key];
       });
     }
-    window.showToast("Please check the form", { type: "error" });
+    if (notify) window.showToast("Please check the form", { type: "error" });
   }
 
   function receiveTasks(snapshot) {
@@ -182,6 +182,8 @@
       $("#add-file-upload")?.remove();
       $("#file-upload-list")?.remove();
     }
+    const stopButton = $("#stop-task");
+    if (stopButton) stopButton.hidden = !task || task.status !== "IN PROGRESS";
     const archiveButton = $("#archive-task");
     if (archiveButton) archiveButton.hidden = !task || !["WAIT", "DONE"].includes(task.status);
     ["#reopen-task", "#done-task"].forEach((selector) => {
@@ -206,6 +208,7 @@
         status.append(option);
       });
       ["#reopen-task", "#done-task"].forEach((selector) => { const button = $(selector); if (button) button.hidden = nextStatus !== "REVIEW"; });
+      if (stopButton) stopButton.hidden = nextStatus !== "IN PROGRESS";
       if (deleteButton) deleteButton.hidden = !["BACKLOG", "ARCHIVE"].includes(nextStatus);
       if (archiveButton) archiveButton.hidden = !["WAIT", "DONE"].includes(nextStatus);
     }, () => { render(); });
@@ -261,7 +264,7 @@
         closeForm();
       }
       window.showToast(`Task moved to ${destination}`);
-    } catch (error) { window.showToast(error.message || "Unable to move task", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to move task", { type: "error" }); }
     finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -285,7 +288,7 @@
       tasks = (await response.json()).tasks;
       render();
       window.showToast("Task archived");
-    } catch (error) { window.showToast(error.message || "Unable to archive task", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to archive task", { type: "error" }); }
     finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -307,7 +310,7 @@
       render();
       closeForm();
       window.showToast("Task deleted");
-    } catch (error) { window.showToast(error.message || "Unable to delete task", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to delete task", { type: "error" }); }
     finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -327,12 +330,14 @@
         const task = tasks.find((item) => item.task_id === window.openTaskId);
         if (task) openForm(task);
       }
-    } catch (error) { window.showToast(error.message || "Unable to load tasks", { type: "error" }); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to load tasks", { type: "error" }); }
   }
 
-  async function save(event) {
+  async function save(event, stop = false) {
     event.preventDefault();
-    const button = $("#save-task");
+    if (stop && (!editing || editing.status !== "IN PROGRESS")) return;
+    const stoppedId = stop ? editing.task_id : null;
+    const button = $(stop ? "#stop-task" : "#save-task");
     if (!button || button.disabled) return;
     if (window.spinner && !window.spinner.start(button)) return;
     try {
@@ -342,6 +347,11 @@
       const description = $("#task-description");
       const status = $("#task-status");
       if (!taskId || !title || !description || !status) return;
+      if (!editing && !/^[A-Za-z0-9_-]+$/.test(taskId.value.trim())) {
+        showErrors({ task_id: taskId.value.trim() ? "Task ID may contain only letters A-Z, numbers, hyphens and underscores" : "Task ID is required" });
+        return;
+      }
+      clearErrors();
       const url = editing ? `/api/board/tasks/${encodeURIComponent(editing.task_id)}` : "/api/board/tasks";
       let request;
       if (selectedFiles.length) {
@@ -350,7 +360,7 @@
         data.append("title", $("#task-title").value);
         data.append("description", $("#task-description").value);
         if (editing) {
-          data.append("status", $("#task-status").value);
+          data.append("status", stop ? "BACKLOG" : $("#task-status").value);
           data.append("remove_attachment_ids", JSON.stringify(removedAttachments));
         }
         selectedFiles.forEach((file) => data.append("files", file));
@@ -358,7 +368,7 @@
       } else {
         const payload = { title: $("#task-title").value, description: $("#task-description").value };
         if (editing) {
-          payload.status = $("#task-status").value;
+          payload.status = stop ? "BACKLOG" : $("#task-status").value;
           payload.remove_attachment_ids = removedAttachments;
         } else {
           payload.task_id = $("#task-id").value;
@@ -369,9 +379,10 @@
       if (!response.ok) return await apiError(response);
       closeForm();
       await load();
-      window.showToast("Task saved");
+      if (stop && !window.openTaskId) openForm(tasks.find(task => task.task_id === stoppedId));
+      window.showToast(stop ? "Task stopped" : "Task saved");
     } catch (error) {
-      if (error.detail) showErrors(error.detail); else window.showToast(error.message || "Unable to save task", { type: "error" });
+      if (error.detail) showErrors(error.detail, !error.reported); else if (!error.reported) window.showToast(error.message || "Unable to save task", { type: "error" });
     } finally { if (window.spinner) window.spinner.stop(button); }
   }
 
@@ -388,7 +399,7 @@
       if (!response.ok) return await apiError(response);
       tasks = (await response.json()).tasks;
       render();
-    } catch (error) { window.showToast(error.message || "Unable to move task", { type: "error" }); render(); }
+    } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to move task", { type: "error" }); render(); }
   }
 
   function getDragAfterElement(container, y) {
@@ -432,7 +443,7 @@
         if (form.dataset.spinnerActive === "true") return;
         openForm(null);
         $("#task-id").value = data.task_id;
-      } catch (error) { window.showToast(error.message || "Unable to generate task ID", { type: "error" }); }
+      } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to generate task ID", { type: "error" }); }
     });
     $("#close-task")?.addEventListener("click", requestCloseForm);
     $("#cancel-task")?.addEventListener("click", requestCloseForm);
@@ -442,6 +453,9 @@
     $("#done-task")?.addEventListener("click", (event) => reviewTask("DONE", event.currentTarget));
     $("#add-file-upload")?.addEventListener("click", addFileUpload);
     $("#task-modal")?.addEventListener("click", (event) => { if (event.target.id === "task-modal" && $("#board")) requestCloseForm(); });
+    $("#stop-task")?.addEventListener("click", (event) => {
+      if (form.reportValidity()) save(event, true);
+    });
     form.addEventListener("submit", save);
     setupDrop();
     load().finally(() => {

@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import board_store
+import agent_store
 import main
 
 
@@ -99,6 +100,34 @@ def test_board_api_create_and_allowed_transition(tmp_path, monkeypatch):
         moved = client.patch("/api/board/tasks/PRJ-1/move", json={"status": "OPEN", "position": 0})
         assert moved.status_code == 200
         assert moved.json()["tasks"][0]["status"] == "OPEN"
+
+
+@pytest.mark.parametrize("method", ["move", "save", "multipart"])
+def test_open_can_return_to_backlog_without_agent_claim(method):
+    with TestClient(main.app) as client:
+        original = board_store.create_task("RETURN-1", "Queued task", "Details", [("note.txt", "text/plain", b"note")])
+        board_store.move_task("RETURN-1", "OPEN", 0)
+        board_store.create_task("RETURN-2", "Existing backlog task", "Details", [])
+        if method == "move":
+            response = client.patch("/api/board/tasks/RETURN-1/move", json={"status": "BACKLOG", "position": 0})
+        else:
+            payload = {"title": "Edited task", "description": "Edited details", "status": "BACKLOG"}
+            if method == "multipart":
+                response = client.put("/api/board/tasks/RETURN-1", data=payload,
+                                      files={"files": ("new.txt", b"new", "text/plain")})
+            else:
+                response = client.put("/api/board/tasks/RETURN-1", json=payload)
+        assert response.status_code == 200
+        task = client.get("/api/board/tasks/RETURN-1").json()
+        assert task["status"] == "BACKLOG"
+        assert task["title"] == ("Queued task" if method == "move" else "Edited task")
+        assert task["description"] == ("Details" if method == "move" else "Edited details")
+        assert task["attachments"][0] == original["attachments"][0]
+        backlog = [item["task_id"] for item in board_store.list_tasks() if item["status"] == "BACKLOG"]
+        assert backlog == (["RETURN-1", "RETURN-2"] if method == "move" else ["RETURN-2", "RETURN-1"])
+        assert agent_store.claim(300) is None
+        board_store.move_task("RETURN-1", "OPEN", 0)
+        assert agent_store.claim(300)["task_id"] == "RETURN-1"
 
 
 def test_board_api_create_and_update_multiple_attachments(tmp_path, monkeypatch):
@@ -239,3 +268,24 @@ def test_mutations_lock_before_reading_order_or_status(monkeypatch, operation):
     assert attempts
     assert not failures, failures
     assert board_store.get_task("RACE-1")["status"] == "OPEN"
+
+
+@pytest.mark.parametrize("task_id", ["../task", "A/B", "A\\B", ".", "..", "A.B", "A:B", "A*B", "A?B", 'A"B', "A<B", "A>B", "A|B", "A B", "A\nB", "A\x00B", "A%2fB", "ЗАДАЧА-1"])
+@pytest.mark.parametrize("multipart", [False, True])
+def test_creation_rejects_unsafe_task_id(task_id, multipart):
+    with TestClient(main.app) as client:
+        payload = {"task_id": task_id, "title": "Task", "description": "Details"}
+        options = {"data": payload, "files": {"files": ("note.txt", b"content")}} if multipart else {"json": payload}
+        response = client.post("/api/board/tasks", **options)
+        assert response.status_code == 422
+        assert "task_id" in response.json()["detail"]
+        assert board_store.list_tasks() == []
+        assert not list(board_store.FILES_DIR.rglob("*"))
+
+
+@pytest.mark.parametrize("task_id", ["PRJ-12", "project_12", "123", "  Prj_12-3  "])
+def test_creation_accepts_safe_task_id(task_id):
+    with TestClient(main.app) as client:
+        response = client.post("/api/board/tasks", json={"task_id": task_id, "title": "Task", "description": "Details"})
+        assert response.status_code == 201
+        assert response.json()["task_id"] == task_id.strip()
