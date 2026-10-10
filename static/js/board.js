@@ -161,8 +161,9 @@
     dialogTitle.textContent = task ? `Edit ${task.task_id}` : "New task";
     taskId.value = task ? task.task_id : "";
     taskId.readOnly = Boolean(task);
-    title.value = task ? task.title : "";
-    description.value = task ? task.description : "";
+    const draft = !task && window.taskDraft ? window.taskDraft.read() : { title: "", description: "" };
+    title.value = task ? task.title : draft.title;
+    description.value = task ? task.description : draft.description;
     status.replaceChildren();
     const availableStatuses = task ? [task.status].concat(transitions[task.status] || []) : ["BACKLOG"];
     availableStatuses.forEach((statusValue) => {
@@ -377,6 +378,7 @@
       }
       const response = await fetch(url, request);
       if (!response.ok) return await apiError(response);
+      if (!editing && window.taskDraft) window.taskDraft.clear();
       closeForm();
       await load();
       if (stop && !window.openTaskId) openForm(tasks.find(task => task.task_id === stoppedId));
@@ -434,6 +436,13 @@
   document.addEventListener("DOMContentLoaded", () => {
     const form = $("#task-form");
     if (!form) return;
+    ["#task-title", "#task-description"].forEach((selector) => {
+      $(selector)?.addEventListener("input", () => {
+        if (!editing && !$("#task-modal").hidden && window.taskDraft) {
+          window.taskDraft.write($("#task-title").value, $("#task-description").value);
+        }
+      });
+    });
     $("#new-task-button")?.addEventListener("click", async () => {
       if (form.dataset.spinnerActive === "true") return;
       try {
@@ -447,6 +456,13 @@
     });
     $("#close-task")?.addEventListener("click", requestCloseForm);
     $("#cancel-task")?.addEventListener("click", requestCloseForm);
+    document.addEventListener("keydown", (event) => {
+      const modal = $("#task-modal");
+      if (event.key === "Escape" && $("#board") && modal && !modal.hidden) {
+        event.preventDefault();
+        requestCloseForm();
+      }
+    });
     $("#archive-task")?.addEventListener("click", archiveTask);
     $("#delete-task")?.addEventListener("click", deleteTask);
     $("#reopen-task")?.addEventListener("click", (event) => reviewTask("OPEN", event.currentTarget));
