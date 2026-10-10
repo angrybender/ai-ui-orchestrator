@@ -120,18 +120,42 @@
     input.className = "task-file-input";
     input.type = "file";
     const remove = document.createElement("button");
-    remove.className = "button file-upload-remove";
+    remove.className = "file-upload-remove";
     remove.type = "button";
     remove.textContent = "Remove";
-    remove.addEventListener("click", () => row.remove());
-    row.append(input, remove);
+    input.addEventListener("change", updateFileUploadButtons);
+    remove.addEventListener("click", () => {
+      row.remove();
+      updateFileUploadButtons();
+    });
+    const name = document.createElement("span");
+    name.className = "file-upload-name";
+    name.hidden = true;
+    row.append(input, name, remove);
     list.append(row);
-    updateFileUploadButtons();
+    remove.hidden = true;
   }
 
   function updateFileUploadButtons() {
-    const rows = document.querySelectorAll(".file-upload-row");
-    rows.forEach((row) => { row.querySelector(".file-upload-remove").hidden = rows.length === 1; });
+    const list = $("#file-upload-list");
+    if (!list) return;
+    let emptyRow;
+    Array.from(list.children).forEach((row) => {
+      const input = row.querySelector(".task-file-input");
+      const hasFile = input.files.length > 0;
+      input.hidden = hasFile;
+      row.classList.toggle("file-upload-selected", hasFile);
+      const name = row.querySelector(".file-upload-name");
+      name.textContent = hasFile ? input.files[0].name : "";
+      name.hidden = !hasFile;
+      row.querySelector(".file-upload-remove").hidden = !hasFile;
+      if (!hasFile) {
+        if (emptyRow) row.remove();
+        else emptyRow = row;
+      }
+    });
+    if (emptyRow) list.append(emptyRow);
+    else addFileUpload();
   }
 
   function getSelectedFiles() {
@@ -180,7 +204,6 @@
     if (archiveMode) {
       status.disabled = true;
       document.querySelectorAll("#task-form input, #task-form textarea, #task-form select").forEach((field) => { field.disabled = true; });
-      $("#add-file-upload")?.remove();
       $("#file-upload-list")?.remove();
     }
     const stopButton = $("#stop-task");
@@ -467,7 +490,6 @@
     $("#delete-task")?.addEventListener("click", deleteTask);
     $("#reopen-task")?.addEventListener("click", (event) => reviewTask("OPEN", event.currentTarget));
     $("#done-task")?.addEventListener("click", (event) => reviewTask("DONE", event.currentTarget));
-    $("#add-file-upload")?.addEventListener("click", addFileUpload);
     $("#task-modal")?.addEventListener("click", (event) => { if (event.target.id === "task-modal" && $("#board")) requestCloseForm(); });
     $("#stop-task")?.addEventListener("click", (event) => {
       if (form.reportValidity()) save(event, true);
