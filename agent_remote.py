@@ -424,8 +424,9 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     if not isinstance(session_id, str) or not session_id.strip():
                         raise ACPError("session/load: missing saved session id")
                     try:
+                        # session/load replays saved history, not a reply to this run's prompt.
                         _request(stdin, stdout, request_id, "session/load", {
-                            "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
+                            "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, None, raw_log, control.send)
                     except ACPError as exception:
                         if not exception.session_missing:
                             raise
