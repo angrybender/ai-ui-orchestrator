@@ -344,6 +344,58 @@ def test_failed_replacement_is_not_retried(setup, replacement):
     assert len(ssh.channel.stdin.getvalue().splitlines()) == 3
 
 
+@pytest.mark.parametrize('next_response', [None, 'New response.', 'Previous response.'])
+def test_resume_replay_does_not_create_chat_response(setup, monkeypatch, next_response):
+    import agent_store
+    import agent_worker
+    import board_store
+
+    ssh, config, _, _, _, _ = setup
+    monkeypatch.setattr(agent_worker.Config, 'get', staticmethod(config.get))
+    board_store.init_database()
+    agent_store.init_database()
+    board_store.create_task('PRJ-12', 'Replay', 'Resume without duplicating history', [])
+    board_store.move_task('PRJ-12', 'OPEN', 0)
+    ssh.channel.messages.insert(2, update('Previous response.'))
+    assert agent_worker.execute() == 0
+    previous = board_store.get_chat('PRJ-12')['messages'][0].copy()
+    board_store.add_user_comment('PRJ-12', 'Continue')
+    ssh.channel = FakeChannel(ssh)
+    ssh.channel.messages = [reply(1, {'protocolVersion': 1}),
+        update('Earlier history'),
+        {'jsonrpc': '2.0', 'method': 'session/update', 'params': {'update': {
+            'sessionUpdate': 'user_message_chunk', 'content': {'type': 'text', 'text': 'Old comment'}}}},
+        update('Previous '), update('response.'), reply(2, {})]
+    if next_response is not None:
+        ssh.channel.messages.extend([update(next_response[:4]), update(next_response[4:])])
+    ssh.channel.messages.append(reply(3, {'stopReason': 'end_turn'}))
+    original_session = agent_store.session
+    snapshots = []
+
+    def persist(run_id, session_id):
+        # This checkpoint runs after load and before prompt: detect even a transient duplicate.
+        chat = board_store.get_chat('PRJ-12')
+        snapshots.append(chat)
+        assert chat['status'] == 'IN PROGRESS'
+        assert chat['messages'][0] == previous
+        assert [m['text'] for m in chat['messages']] == ['Previous response.', 'Continue']
+        original_session(run_id, session_id)
+
+    monkeypatch.setattr(agent_store, 'session', persist)
+    assert agent_worker.execute() == 0, board_store.get_chat('PRJ-12')
+    assert len(snapshots) == 1
+    chat = board_store.get_chat('PRJ-12')
+    assert chat['status'] == 'REVIEW'
+    assert chat['messages'][0] == previous
+    expected = ['Previous response.', 'Continue']
+    if next_response is not None:
+        expected.append(next_response)
+    assert [m['text'] for m in chat['messages']] == expected
+    with board_store.connect() as db:
+        log = db.execute('SELECT log FROM agent_runs ORDER BY created_at DESC LIMIT 1').fetchone()['log']
+    assert 'Earlier history' in log and 'Previous response.' in log
+
+
 def test_backlog_edits_then_missing_session_recovery_persisted(setup, monkeypatch):
     import agent_store
     import agent_worker
@@ -368,6 +420,7 @@ def test_backlog_edits_then_missing_session_recovery_persisted(setup, monkeypatc
     board_store.add_user_comment('PRJ-12', 'Continue the work')
     ssh.channel = FakeChannel(ssh)
     ssh.channel.messages = [reply(1, {'protocolVersion': 1}),
+        update('Partially restored history.'),
         {'jsonrpc': '2.0', 'id': 2, 'error': {'code': -32603, 'message': 'Session not found'}},
         reply(3, {'sessionId': 'replacement-session'}), update('Completed after recovery'),
         reply(4, {'stopReason': 'end_turn'})]
