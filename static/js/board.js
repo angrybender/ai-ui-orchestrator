@@ -120,18 +120,42 @@
     input.className = "task-file-input";
     input.type = "file";
     const remove = document.createElement("button");
-    remove.className = "button file-upload-remove";
+    remove.className = "file-upload-remove";
     remove.type = "button";
     remove.textContent = "Remove";
-    remove.addEventListener("click", () => row.remove());
-    row.append(input, remove);
+    input.addEventListener("change", updateFileUploadButtons);
+    remove.addEventListener("click", () => {
+      row.remove();
+      updateFileUploadButtons();
+    });
+    const name = document.createElement("span");
+    name.className = "file-upload-name";
+    name.hidden = true;
+    row.append(input, name, remove);
     list.append(row);
-    updateFileUploadButtons();
+    remove.hidden = true;
   }
 
   function updateFileUploadButtons() {
-    const rows = document.querySelectorAll(".file-upload-row");
-    rows.forEach((row) => { row.querySelector(".file-upload-remove").hidden = rows.length === 1; });
+    const list = $("#file-upload-list");
+    if (!list) return;
+    let emptyRow;
+    Array.from(list.children).forEach((row) => {
+      const input = row.querySelector(".task-file-input");
+      const hasFile = input.files.length > 0;
+      input.hidden = hasFile;
+      row.classList.toggle("file-upload-selected", hasFile);
+      const name = row.querySelector(".file-upload-name");
+      name.textContent = hasFile ? input.files[0].name : "";
+      name.hidden = !hasFile;
+      row.querySelector(".file-upload-remove").hidden = !hasFile;
+      if (!hasFile) {
+        if (emptyRow) row.remove();
+        else emptyRow = row;
+      }
+    });
+    if (emptyRow) list.append(emptyRow);
+    else addFileUpload();
   }
 
   function getSelectedFiles() {
@@ -161,8 +185,9 @@
     dialogTitle.textContent = task ? `Edit ${task.task_id}` : "New task";
     taskId.value = task ? task.task_id : "";
     taskId.readOnly = Boolean(task);
-    title.value = task ? task.title : "";
-    description.value = task ? task.description : "";
+    const draft = !task && window.taskDraft ? window.taskDraft.read() : { title: "", description: "" };
+    title.value = task ? task.title : draft.title;
+    description.value = task ? task.description : draft.description;
     status.replaceChildren();
     const availableStatuses = task ? [task.status].concat(transitions[task.status] || []) : ["BACKLOG"];
     availableStatuses.forEach((statusValue) => {
@@ -179,7 +204,6 @@
     if (archiveMode) {
       status.disabled = true;
       document.querySelectorAll("#task-form input, #task-form textarea, #task-form select").forEach((field) => { field.disabled = true; });
-      $("#add-file-upload")?.remove();
       $("#file-upload-list")?.remove();
     }
     const stopButton = $("#stop-task");
@@ -377,6 +401,7 @@
       }
       const response = await fetch(url, request);
       if (!response.ok) return await apiError(response);
+      if (!editing && window.taskDraft) window.taskDraft.clear();
       closeForm();
       await load();
       if (stop && !window.openTaskId) openForm(tasks.find(task => task.task_id === stoppedId));
@@ -434,6 +459,13 @@
   document.addEventListener("DOMContentLoaded", () => {
     const form = $("#task-form");
     if (!form) return;
+    ["#task-title", "#task-description"].forEach((selector) => {
+      $(selector)?.addEventListener("input", () => {
+        if (!editing && !$("#task-modal").hidden && window.taskDraft) {
+          window.taskDraft.write($("#task-title").value, $("#task-description").value);
+        }
+      });
+    });
     $("#new-task-button")?.addEventListener("click", async () => {
       if (form.dataset.spinnerActive === "true") return;
       try {
@@ -447,11 +479,17 @@
     });
     $("#close-task")?.addEventListener("click", requestCloseForm);
     $("#cancel-task")?.addEventListener("click", requestCloseForm);
+    document.addEventListener("keydown", (event) => {
+      const modal = $("#task-modal");
+      if (event.key === "Escape" && $("#board") && modal && !modal.hidden) {
+        event.preventDefault();
+        requestCloseForm();
+      }
+    });
     $("#archive-task")?.addEventListener("click", archiveTask);
     $("#delete-task")?.addEventListener("click", deleteTask);
     $("#reopen-task")?.addEventListener("click", (event) => reviewTask("OPEN", event.currentTarget));
     $("#done-task")?.addEventListener("click", (event) => reviewTask("DONE", event.currentTarget));
-    $("#add-file-upload")?.addEventListener("click", addFileUpload);
     $("#task-modal")?.addEventListener("click", (event) => { if (event.target.id === "task-modal" && $("#board")) requestCloseForm(); });
     $("#stop-task")?.addEventListener("click", (event) => {
       if (form.reportValidity()) save(event, true);

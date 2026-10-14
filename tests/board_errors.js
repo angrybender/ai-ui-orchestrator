@@ -46,6 +46,7 @@ const path = require('node:path');
     await page.waitForFunction(() => document.querySelector('#task-form').dataset.spinnerActive === 'true');
     await page.locator('#task-form').dispatchEvent('submit', { bubbles: true, cancelable: true });
     await page.locator('#close-task').click();
+    await page.keyboard.press('Escape');
     assert.equal(await page.locator('#task-modal').isVisible(), true);
     await page.waitForTimeout(30);
     assert.equal(saves, 1);

@@ -1,0 +1,88 @@
+const { chromium } = require('playwright');
+const { expect } = require('playwright/test');
+const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
+const fs = require('node:fs');
+const readline = require('node:readline');
+const root = path.resolve(__dirname, '..');
+const python = path.join(root, 'dev-venv/bin/python');
+const fixture = path.join(__dirname, 'board_live_server.py');
+
+(async () => {
+  const server = spawn(python, ['-B', '-u', fixture], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  let browser, info, log = '';
+  server.stderr.on('data', data => { log += data; });
+  try {
+    info = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(log || 'Fixture timeout')), 15000);
+      readline.createInterface({ input: server.stdout }).once('line', line => { clearTimeout(timer); resolve(JSON.parse(line)); });
+      server.once('error', reject);
+    });
+    browser = await chromium.launch();
+    const page = await browser.newPage({ viewport: { width: 1459, height: 1000 } });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(info.url);
+    const button = page.locator('#clear-db-button');
+    await expect(button).toHaveText('Clear DB');
+    const clearBox = await button.boundingBox();
+    const recoveryBox = await page.locator('#agent-recovery-button').boundingBox();
+    assert(clearBox.x + clearBox.width <= recoveryBox.x);
+    assert.equal(clearBox.y, recoveryBox.y);
+    let posts = 0;
+    page.on('request', request => { if (request.url().endsWith('/api/database/clear')) posts++; });
+    await page.request.post(info.url + '/api/board/tasks', { data: { task_id: 'CLEAR-1', title: 'Clear check', description: 'Description' } });
+    await expect(page.locator('.task-card')).toHaveCount(1);
+    page.once('dialog', dialog => dialog.dismiss());
+    await button.click();
+    assert.equal(posts, 0);
+    await expect(page.locator('.task-card')).toHaveCount(1);
+    if (process.env.CLEAR_SCREENSHOTS) await page.screenshot({ path: process.env.CLEAR_SCREENSHOTS + '-desktop.png' });
+    let release, arrived;
+    const pending = new Promise(resolve => { arrived = resolve; });
+    await page.route('**/api/database/clear', async route => {
+      await new Promise(resolve => { release = resolve; arrived(); });
+      await route.continue();
+    });
+    page.once('dialog', dialog => { assert(dialog.message().includes('cannot be undone')); return dialog.accept(); });
+    await button.click();
+    await pending;
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(button.locator('.spinner')).toBeVisible();
+    await expect(button).toHaveText('Clearing…');
+    if (process.env.CLEAR_SCREENSHOTS) await page.screenshot({ path: process.env.CLEAR_SCREENSHOTS + '-loading.png' });
+    await button.dispatchEvent('click');
+    assert.equal(posts, 1);
+    release();
+    await expect(button).toBeEnabled();
+    await expect(page.locator('.toast').last()).toHaveText('Local database cleared.');
+    await expect(page.locator('.task-card')).toHaveCount(0);
+    await page.unroute('**/api/database/clear');
+    assert.deepEqual((await (await page.request.get(info.url + '/api/board/tasks')).json()).tasks, []);
+    await page.route('**/api/database/clear', route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'Stop active agent runs before clearing the database.' }) }));
+    page.once('dialog', dialog => dialog.accept());
+    await button.click();
+    await expect(page.locator('.toast[role=alert]').last()).toHaveText('Stop active agent runs before clearing the database.');
+    await expect(button).toBeEnabled();
+    await page.unroute('**/api/database/clear');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(button).toBeVisible();
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    if (process.env.CLEAR_SCREENSHOTS) await page.screenshot({ path: process.env.CLEAR_SCREENSHOTS + '-mobile.png' });
+    await page.request.post(info.url + '/api/board/tasks', { data: { task_id: 'CLEAR-2', title: 'After clear', description: 'Description' } });
+    await page.goto(info.url + '/tasks/CLEAR-2');
+    await expect(button).toHaveCount(0);
+    assert.deepEqual(errors, []);
+    console.log('PASS: Clear DB placement, cancel/confirm, real cleanup and SSE, duplicate guard, Spinner, errors, 320px layout, reuse and Board-only visibility');
+  } finally {
+    if (browser) await browser.close();
+    const exited = new Promise(resolve => server.once('exit', resolve));
+    server.stdin.end('\n');
+    const timer = setTimeout(() => server.kill('SIGKILL'), 10000);
+    await exited;
+    clearTimeout(timer);
+    if (info) assert.equal(fs.existsSync(info.directory), false);
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
