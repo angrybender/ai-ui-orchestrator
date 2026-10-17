@@ -182,7 +182,7 @@
     clearErrors();
     mode.value = task ? "edit" : "create";
     key.value = task ? task.task_id : "";
-    dialogTitle.textContent = task ? `Edit ${task.task_id}` : "New task";
+    dialogTitle.textContent = task ? `${task.task_id}` : "New task";
     taskId.value = task ? task.task_id : "";
     taskId.readOnly = Boolean(task);
     const draft = !task && window.taskDraft ? window.taskDraft.read() : { title: "", description: "" };
