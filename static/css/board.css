@@ -7,9 +7,9 @@
 .task-dialog.has-chat .task-chat { grid-column:2; grid-row:1 / span 8; }
 .task-form > * { min-width:0; }
 .task-chat[hidden], .chat-composer[hidden] { display:none; }
-.task-chat { min-width:0; min-height:420px; border:1px solid #aaa; padding:16px; display:flex; flex-direction:column; gap:14px; }
-.chat-messages { flex:1; overflow:auto; display:flex; flex-direction:column; gap:20px; }
-.chat-message { max-width:90%; margin:0; padding:10px 12px; border-radius:7px; overflow-wrap:anywhere; display:flex; flex-direction:column; gap:7px; }
+.task-chat { contain:size; min-width:0; min-height:420px; max-height:max(420px, calc(100dvh - 150px)); border:1px solid #aaa; padding:16px; display:flex; flex-direction:column; gap:14px; }
+.chat-messages { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; display:flex; flex-direction:column; gap:20px; }
+.chat-message { flex-shrink:0; max-width:90%; margin:0; padding:10px 12px; border-radius:7px; overflow-wrap:anywhere; display:flex; flex-direction:column; gap:7px; }
 .chat-message-body { line-height:1.45; }
 .chat-message-body > :first-child { margin-top:0; }
 .chat-message-body > :last-child { margin-bottom:0; }
@@ -21,10 +21,10 @@
 .chat-message-time { color:#777487; font-size:10px; white-space:nowrap; }
 .chat-agent { align-self:flex-start; background:#f2f2f5; }
 .chat-user { align-self:flex-end; background:#e7efff; }
-.chat-composer { margin-top:auto; }
+.chat-composer { flex-shrink:0; margin-top:auto; }
 .chat-composer label { display:block; margin-bottom:6px; color:#555364; font-size:12px; font-weight:700; }
 .chat-composer textarea { width:100%; min-height:90px; resize:vertical; padding:10px 12px; border:1px solid #cccbd7; border-radius:7px; font:inherit; }
-@media (max-width:700px) { .task-dialog.has-chat .task-form { grid-template-columns:minmax(0, 1fr); } .task-dialog.has-chat .task-chat { grid-column:1; grid-row:auto; min-height:280px; } }
+@media (max-width:700px) { .task-dialog.has-chat .task-form { grid-template-columns:minmax(0, 1fr); } .task-dialog.has-chat .task-chat { grid-column:1; grid-row:auto; height:clamp(360px, 65dvh, 560px); min-height:0; max-height:none; } }
 
 .board { display:grid; grid-template-columns:repeat(6, minmax(190px, 1fr)); gap:12px; align-items:start; overflow-x:auto; padding-bottom:12px; }
 .board-column { min-height:430px; padding:12px; border:1px solid var(--border); border-radius:14px; background:#f1f1f6; }

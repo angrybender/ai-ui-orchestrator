@@ -100,7 +100,7 @@
     document.querySelector(".task-dialog").classList.toggle("has-chat", !panel.hidden);
     document.querySelector(".task-page-editor")?.classList.toggle("has-chat", !panel.hidden);
     current.onStatus(data.status);
-    if (agentUpdated) messages.lastElementChild?.scrollIntoView({ block: "end", inline: "nearest" });
+    if (agentUpdated) messages.scrollTop = messages.scrollHeight;
   }
 
   async function readResponse(response) {
