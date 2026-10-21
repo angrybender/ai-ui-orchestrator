@@ -23,7 +23,7 @@
 .chat-user { align-self:flex-end; background:#e7efff; }
 .chat-composer { flex-shrink:0; margin-top:auto; }
 .chat-composer label { display:block; margin-bottom:6px; color:#555364; font-size:12px; font-weight:700; }
-.chat-composer textarea { width:100%; min-height:90px; resize:vertical; padding:10px 12px; border:1px solid #cccbd7; border-radius:7px; font:inherit; }
+.task-chat .chat-composer textarea { width:100%; height:calc(2lh + 22px); min-height:calc(2lh + 22px); max-height:170px; resize:none; overflow-y:auto; padding:10px 12px; border:1px solid #cccbd7; border-radius:7px; font:inherit; line-height:1.45; }
 @media (max-width:700px) { .task-dialog.has-chat .task-form { grid-template-columns:minmax(0, 1fr); } .task-dialog.has-chat .task-chat { grid-column:1; grid-row:auto; height:clamp(360px, 65dvh, 560px); min-height:0; max-height:none; } }
 
 .board { display:grid; grid-template-columns:repeat(6, minmax(190px, 1fr)); gap:12px; align-items:start; overflow-x:auto; padding-bottom:12px; }
@@ -47,11 +47,12 @@
 .task-extra-status span { width:13px; height:13px; border:2px solid #474550; border-radius:50%; }
 .task-extra-status[data-phase="Init"] span { background:#f4e96f; }
 .task-extra-status[data-phase="Agent"] span { background:#4389e7; }
-.modal-backdrop { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:#24223880; }
+.modal-backdrop { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px 5vw; background:#24223880; }
 .task-page-editor { max-width:760px; }
 .task-page-editor .task-dialog { width:100%; box-shadow:none; }
 .modal-backdrop[hidden] { display:none; }
 .task-dialog { width:min(100%, 680px); max-height:calc(100vh - 40px); overflow:auto; padding:24px 28px; border-radius:16px; background:var(--surface); box-shadow:0 24px 80px #16142555; }
+.modal-backdrop .task-dialog { width:90vw; }
 .dialog-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }.dialog-header h2 { margin:0; font-size:21px; }.icon-button { border:0; background:none; color:var(--muted); font-size:28px; cursor:pointer; }
 .task-form { display:grid; gap:14px; }.task-form label { display:block; margin-bottom:6px; color:#555364; font-size:12px; font-weight:700; }.task-form input:not([type=file]), .task-form textarea, .task-form select { width:100%; padding:10px 12px; border:1px solid #cccbd7; border-radius:7px; font:inherit; }.task-form textarea { min-height:170px; resize:vertical; }.task-form input:focus, .task-form textarea:focus, .task-form select:focus { outline:0; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }.field-error { min-height:16px; margin:4px 0 0; color:#c34457; font-size:11px; }.file-upload-list { display:grid; gap:8px; }.file-upload-row { display:flex; align-items:center; gap:8px; }.file-upload-row input[type=file] { width:0; min-width:0; flex:1; }.attachment-list { display:grid; gap:5px; margin-top:8px; }.attachment-row, .file-upload-selected { display:flex; justify-content:space-between; gap:8px; padding:7px 9px; border-radius:6px; background:#f4f3f8; font-size:12px; }.attachment-row button, .file-upload-selected button { border:0; color:#c34457; background:none; cursor:pointer; }.task-page-card { position:relative; max-width:760px; padding:38px 28px 28px; border:1px solid var(--border); border-radius:15px; background:#fff; }.task-page-card h2 { margin:0 0 16px; }.task-description { white-space:pre-wrap; line-height:1.6; }.task-created { color:var(--muted); font-size:12px; }
 @media (max-width:820px) { .board { grid-template-columns:repeat(6, minmax(230px, 1fr)); }.task-dialog { padding:20px; } }
@@ -62,3 +63,16 @@
 .attachment-row button, .file-upload-selected button { flex-shrink:0; }
 
 .attachment-list:not(:empty) { margin-bottom:8px; }
+
+body:has(.task-page-editor) { min-height:100dvh; display:flex; flex-direction:column; }
+.main-content:has(.task-page-editor) { flex:1; display:flex; flex-direction:column; padding-bottom:24px; }
+.task-page-editor { flex:1; display:flex; flex-direction:column; }
+.task-page-editor .task-dialog { flex:1; display:flex; flex-direction:column; max-height:none; }
+.task-page-editor .task-form { flex:1; }
+@media (min-width:701px) {
+  .task-page-editor .task-form { grid-template-rows:auto auto minmax(min-content, 1fr) auto auto auto; }
+  .task-page-editor.has-chat .task-chat { grid-row:1 / span 6; max-height:none; }
+  .task-page-editor .field-control:has(#task-description) { display:flex; flex-direction:column; }
+  .task-page-editor #task-description { flex:1; }
+}
+@media (max-width:820px) { .main-content:has(.task-page-editor) { padding-bottom:20px; } }

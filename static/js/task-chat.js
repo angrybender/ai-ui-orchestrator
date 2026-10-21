@@ -8,6 +8,7 @@
   let lastAgentContent = null;
   let failed = false;
   let pendingData = null;
+  let initialScrollPending = false;
   let panel, messages, composer, input, button;
 
   function spinnerActive() {
@@ -22,6 +23,22 @@
     }
   }
 
+  function resizeComment() {
+    if (!input.clientWidth) {
+      input.style.height = "";
+      input.style.overflowY = "";
+      return;
+    }
+    const style = getComputedStyle(input);
+    const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    const maximum = parseFloat(style.maxHeight);
+    input.style.overflowY = "hidden";
+    input.style.height = "auto";
+    const height = input.scrollHeight + border;
+    input.style.height = `${Math.min(height, maximum)}px`;
+    input.style.overflowY = height > maximum ? "auto" : "hidden";
+  }
+
   function setup() {
     if (panel) return;
     const form = document.querySelector("#task-form");
@@ -31,12 +48,21 @@
     panel.className = "task-chat";
     panel.setAttribute("aria-label", "Task comments");
     panel.hidden = true;
-    panel.innerHTML = '<div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div><div id="chat-composer" class="chat-composer"><label for="chat-comment">User comment</label><textarea id="chat-comment" placeholder="user comment" maxlength="32000"></textarea><p class="field-error" id="chat-error" role="alert"></p><div class="form-actions"><button class="button" id="send-comment" type="button">Send comment</button></div></div>';
+    panel.innerHTML = '<div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div><div id="chat-composer" class="chat-composer"><label for="chat-comment">User comment</label><textarea id="chat-comment" rows="2" placeholder="user comment" maxlength="32000"></textarea><p class="field-error" id="chat-error" role="alert"></p><div class="form-actions"><button class="button" id="send-comment" type="button">Send comment</button></div></div>';
     form.append(panel);
     messages = panel.querySelector("#chat-messages");
     composer = panel.querySelector("#chat-composer");
     input = panel.querySelector("#chat-comment");
     button = panel.querySelector("#send-comment");
+    input.addEventListener("input", resizeComment);
+    let previousWidth = 0;
+    new ResizeObserver(() => {
+      const width = input.clientWidth;
+      if (width && width !== previousWidth) {
+        previousWidth = width;
+        resizeComment();
+      }
+    }).observe(input);
     button.addEventListener("click", send);
   }
 
@@ -100,7 +126,8 @@
     document.querySelector(".task-dialog").classList.toggle("has-chat", !panel.hidden);
     document.querySelector(".task-page-editor")?.classList.toggle("has-chat", !panel.hidden);
     current.onStatus(data.status);
-    if (agentUpdated) messages.scrollTop = messages.scrollHeight;
+    if (initialScrollPending || agentUpdated) messages.scrollTop = messages.scrollHeight;
+    initialScrollPending = false;
   }
 
   async function readResponse(response) {
@@ -163,6 +190,7 @@
       const data = await readResponse(response);
       if (data && token === generation) {
         input.value = "";
+        resizeComment();
         render(data);
         current.onSent();
         window.showToast("Comment sent");
@@ -185,6 +213,7 @@
     clearTimeout(timer);
     controller?.abort();
     current = null;
+    initialScrollPending = false;
     if (panel) panel.hidden = true;
     document.querySelector(".task-dialog")?.classList.remove("has-chat");
     document.querySelector(".task-page-editor")?.classList.remove("has-chat");
@@ -197,12 +226,14 @@
       if (!task || !panel) return;
       current = { id: task.task_id, status: task.status, onStatus, onSent };
       input.value = "";
+      resizeComment();
       panel.querySelector("#chat-error").textContent = "";
       messages.replaceChildren();
       lastContent = "";
       failed = false;
       render({ status: task.status, messages: [] });
       lastAgentContent = null;
+      initialScrollPending = true;
       poll(generation);
     },
     close
