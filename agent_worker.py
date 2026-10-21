@@ -18,7 +18,8 @@ from task_init import InitError
 CONFIG_KEYS = (
     'remote_server.username', 'remote_server.host', 'remote_server.password',
     'remote_server.ssh_key', 'tasks.base_dir', 'agent.shell', 'agent.agent_timeout',
-    'agent.prompt', 'agent.continue_session_arg',
+    'agent.prompt', 'agent.continue_session_arg', 'agent.acp_wait_background_tasks',
+    'agent.acp_background_quiet_timeout',
     'tasks.init_script_path', 'tasks.init_script_text', 'tasks.init_script_timeout',
 )
 

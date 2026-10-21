@@ -27,6 +27,8 @@ CONFIG = {
     "agent.agent_timeout": 60,
     "agent.prompt": "Системные инструкции\nВыполни проверки.",
     "agent.continue_session_arg": "--continue",
+    "agent.acp_wait_background_tasks": False,
+    "agent.acp_background_quiet_timeout": 60,
     "tasks.init_script_path": "", "tasks.init_script_text": "", "tasks.init_script_timeout": 300,
 }
 
