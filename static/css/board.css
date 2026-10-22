@@ -15,6 +15,11 @@
 .chat-message-body > :last-child { margin-bottom:0; }
 .chat-message-body pre { overflow:auto; padding:8px; border-radius:5px; background:#e7e7eb; }
 .chat-message-body code { font-family:ui-monospace,monospace; }
+.chat-message-body table { display:block; max-width:100%; overflow-x:auto; border-collapse:collapse; margin:10px 0; font-size:inherit; }
+.chat-message-body th, .chat-message-body td { border:1px solid #cccbd7; padding:7px 10px; vertical-align:top; min-width:80px; overflow-wrap:anywhere; }
+.chat-message-body th:not([align]), .chat-message-body td:not([align]) { text-align:left; }
+.chat-message-body th { background:#e7e7ef; font-weight:600; }
+.chat-message-body tbody tr:nth-child(even) { background:rgba(255,255,255,.45); }
 .chat-message-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
 .chat-copy-button { border:0; padding:0 3px; color:#777487; background:transparent; cursor:pointer; font-size:15px; }
 .chat-copy-button:hover { color:#282735; }
