@@ -182,7 +182,7 @@
     clearErrors();
     mode.value = task ? "edit" : "create";
     key.value = task ? task.task_id : "";
-    dialogTitle.textContent = task ? `Edit ${task.task_id}` : "New task";
+    dialogTitle.textContent = task ? `${task.task_id}` : "New task";
     taskId.value = task ? task.task_id : "";
     taskId.readOnly = Boolean(task);
     const draft = !task && window.taskDraft ? window.taskDraft.read() : { title: "", description: "" };
@@ -210,10 +210,8 @@
     if (stopButton) stopButton.hidden = !task || task.status !== "IN PROGRESS";
     const archiveButton = $("#archive-task");
     if (archiveButton) archiveButton.hidden = !task || !["WAIT", "DONE"].includes(task.status);
-    ["#reopen-task", "#done-task"].forEach((selector) => {
-      const button = $(selector);
-      if (button) button.hidden = !task || task.status !== "REVIEW";
-    });
+    const doneButton = $("#done-task");
+    if (doneButton) doneButton.hidden = !task || task.status !== "REVIEW";
     const cancel = $("#cancel-task");
     if (cancel) cancel.hidden = !$("#board");
     if (!archiveMode) resetFileUploads();
@@ -231,7 +229,7 @@
         option.value = option.textContent = value;
         status.append(option);
       });
-      ["#reopen-task", "#done-task"].forEach((selector) => { const button = $(selector); if (button) button.hidden = nextStatus !== "REVIEW"; });
+      if (doneButton) doneButton.hidden = nextStatus !== "REVIEW";
       if (stopButton) stopButton.hidden = nextStatus !== "IN PROGRESS";
       if (deleteButton) deleteButton.hidden = !["BACKLOG", "ARCHIVE"].includes(nextStatus);
       if (archiveButton) archiveButton.hidden = !["WAIT", "DONE"].includes(nextStatus);
@@ -488,7 +486,6 @@
     });
     $("#archive-task")?.addEventListener("click", archiveTask);
     $("#delete-task")?.addEventListener("click", deleteTask);
-    $("#reopen-task")?.addEventListener("click", (event) => reviewTask("OPEN", event.currentTarget));
     $("#done-task")?.addEventListener("click", (event) => reviewTask("DONE", event.currentTarget));
     $("#task-modal")?.addEventListener("click", (event) => { if (event.target.id === "task-modal" && $("#board")) requestCloseForm(); });
     $("#stop-task")?.addEventListener("click", (event) => {
