@@ -66,6 +66,13 @@ class AgentControl:
         self.stdin.write(payload)
         self.stdin.flush()
 
+    def send_cleanup(self, message):
+        """Permit session teardown after cancellation, within the outer deadline."""
+        with self.lock:
+            if self.cancelled.is_set():
+                raise ValueError('Remote agent cancelled')
+            self._write(message)
+
     def request_cancel(self):
         """Run in a sender thread: a blocked SSH write must not block the deadline."""
         self.requested.set()
@@ -84,6 +91,13 @@ class AgentControl:
             self.cancelled.set()
             pid = self.pid
         confirmed = stop_group(self.transport, pid) if pid else True
+        if self.cycle:
+            self.cycle.agent_stopped(confirmed)
+        return confirmed
+
+    def verify_stopped(self):
+        """Normal background completion verifies the group without signalling it."""
+        confirmed = stop_group(self.transport, self.pid, terminate=False) if self.pid else True
         if self.cycle:
             self.cycle.agent_stopped(confirmed)
         return confirmed
