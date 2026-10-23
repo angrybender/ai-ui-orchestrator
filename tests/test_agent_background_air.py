@@ -37,7 +37,9 @@ def background(task, gate, child=False):
             update('async_task_state_update',sid=sid,asyncTaskId=task,state='stopped')
             time.sleep(.1)
         if mode!='stopped':
-            update('async_task_state_update',sid=sid,asyncTaskId=task,state='failed' if mode=='failed' else 'completed')
+            update('async_task_state_update',sid=sid,asyncTaskId=task,state='failed' if mode.startswith('failed') else 'completed')
+        if mode=='failed-correction':
+            update('async_task_state_update',sid=sid,asyncTaskId=task,state='completed')
         if child:update('subagent_state_update',subagentSessionId=sid,state='completed')
         if mode=='late':
             time.sleep(.2);text('late automatic summary');Path('late.ready').touch()
@@ -64,16 +66,21 @@ try:
         count+=1
         if count==1:
             Path('prompt.ready').touch()
+            if mode=='failed-before-end':
+                Path('release.first').touch()
             if mode not in ('no-jobs','silent','provider-error'):
                 background('first','release.first',mode=='child')
+            if mode=='failed-before-end':
+                for t in threads:t.join()
             text('started')
         else:
+            assert 'inspect its error, recover or retry' in p['prompt'][0]['text']
             Path('verify.'+str(count)).touch()
             if mode=='second' and count==2:background('second','release.second')
             text('verified final answer')
         if mode=='silent':update('usage_update',used=1,size=100)
         if mode=='disconnect':sys.exit(0)
-        result={'stopReason':'refusal' if mode=='refusal' and count>1 else 'end_turn'}
+        result={'stopReason':'refusal' if mode in ('refusal','failed-refusal') and count>1 else 'end_turn'}
         if mode=='provider-error':result['_meta']={'jetbrains':{'air':{'sessionFailure':{'severity':'error'}}}}
     elif m=='session/close':
         if mode=='close-race':background('race','release.race')
@@ -133,12 +140,27 @@ def test_waits_for_results_rechecks_new_work_and_quiet_period(air_harness, mode)
     assert 'qwen/status' not in requests and 'qwen/control' not in requests
 
 
-@pytest.mark.parametrize('mode', ['failed','provider-error','refusal','disconnect','stopped','close-race','postclose-race'])
+@pytest.mark.parametrize('mode', ['failed-refusal','provider-error','refusal','disconnect','stopped','close-race','postclose-race'])
 def test_failure_cannot_reach_review(air_harness, mode):
     h=air_harness(mode);h.start();(h.cwd/'release.first').touch();h.worker.join(5)
     assert not h.worker.is_alive()
     assert board_store.get_task('CANCEL-1')['status']=='WAIT'
     assert saved_run()['state']=='FAILED'
+
+
+@pytest.mark.parametrize('mode', ['failed', 'failed-before-end', 'failed-correction'])
+def test_failed_command_is_processed_by_model_before_review(air_harness, mode):
+    h = air_harness(mode)
+    h.start()
+    (h.cwd/'release.first').touch()
+    wait_for(h, 'verify.2')
+    h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert board_store.get_task('CANCEL-1')['status'] == 'REVIEW', saved_run()['error']
+    assert saved_run()['state'] == 'SUCCEEDED'
+    assert (h.cwd/'close.allowed').exists() and (h.cwd/'peer.exited').exists()
+    assert any('verified final answer' in m['text']
+               for m in board_store.get_chat('CANCEL-1')['messages'])
 
 
 @pytest.mark.parametrize('enabled', [False, None])

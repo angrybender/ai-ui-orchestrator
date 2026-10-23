@@ -6,6 +6,8 @@ CAPABILITIES = ['asyncTasks', 'nativeSubagentSessions', 'sessionFailure']
 FINAL_PROMPT = (
     'Background work has finished. Complete the original task: inspect the results '
     'of all background work, verify the outcome, and finish any remaining work. '
+    'A failed background command does not by itself mean the original task failed: '
+    'inspect its error, recover or retry as needed, and verify the requested result. '
     'Do not merely report that work was started. If you start more background '
     'work, its results must also be checked before the task is complete. '
     'Provide the final answer when the task is finished.'
@@ -139,8 +141,9 @@ class AirBackground:
                     self.unconfirmed_stops.setdefault(key, time.monotonic())
                 else:
                     self.unconfirmed_stops.pop(key, None)
-                if state == 'failed':
-                    self.fail('ACP background task failed.')
+                # A command failure is input for the model's result-processing
+                # turn, not a fatal failure of the ACP session. work_version
+                # ensures that even an early/late failure gets finalized.
         elif kind in ('subagent_spawned', 'subagent_state_update'):
             child = self.identifier(update.get('subagentSessionId'))
             if kind == 'subagent_spawned':
