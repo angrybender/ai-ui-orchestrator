@@ -358,7 +358,7 @@
   async function save(event, stop = false) {
     event.preventDefault();
     if (stop && (!editing || editing.status !== "IN PROGRESS")) return;
-    const stoppedId = stop ? editing.task_id : null;
+    const editedId = editing ? editing.task_id : null;
     const button = $(stop ? "#stop-task" : "#save-task");
     if (!button || button.disabled) return;
     if (window.spinner && !window.spinner.start(button)) return;
@@ -400,9 +400,12 @@
       const response = await fetch(url, request);
       if (!response.ok) return await apiError(response);
       if (!editing && window.taskDraft) window.taskDraft.clear();
-      closeForm();
+      if (!editedId) closeForm();
       await load();
-      if (stop && !window.openTaskId) openForm(tasks.find(task => task.task_id === stoppedId));
+      if (editedId && !window.openTaskId) {
+        const task = tasks.find(task => task.task_id === editedId);
+        if (task) openForm(task);
+      }
       window.showToast(stop ? "Task stopped" : "Task saved");
     } catch (error) {
       if (error.detail) showErrors(error.detail, !error.reported); else if (!error.reported) window.showToast(error.message || "Unable to save task", { type: "error" });

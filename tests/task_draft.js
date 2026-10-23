@@ -90,7 +90,20 @@ const python = process.env.PYTHON || 'python3';
     await check('Черновик задачи', 'Описание\nВторая строка');
     await page.locator('#task-title').fill('Изменённая задача');
     await page.locator('#save-task').click();
-    await expect(page.locator('#task-modal')).toBeHidden();
+    await expect(page.locator('#save-task')).toBeEnabled();
+    await expect(page.locator('#task-modal')).toBeVisible();
+    await check('Изменённая задача', 'Описание\nВторая строка');
+    await expect(page.locator(`.task-card[data-task-id="${savedId}"]`)).toContainText('Изменённая задача');
+    await page.locator('#task-description').fill('Повторное сохранение');
+    await page.locator('#save-task').click();
+    await expect(page.locator('#save-task')).toBeEnabled();
+    await expect(page.locator('#task-modal')).toBeVisible();
+    const persisted = await (await context.request.get(`${info.url}/api/board/tasks/${savedId}`)).json();
+    assert.equal(persisted.description, 'Повторное сохранение');
+    if (process.env.TASK_DRAFT_SCREENSHOTS === '1') {
+      await page.screenshot({ path: path.join(root, 'task-edit-desktop.png') });
+    }
+    await page.locator('#cancel-task').click();
     await open();
     await check('Другой черновик', 'Не менять при редактировании');
     if (process.env.TASK_DRAFT_SCREENSHOTS === '1') {
@@ -106,6 +119,12 @@ const python = process.env.PYTHON || 'python3';
     await expect(standalone.locator('#task-title')).toHaveValue('Изменённая задача');
     await standalone.locator('#task-title').press('Escape');
     await expect(standalone.locator('#task-modal')).toBeVisible();
+    await standalone.locator('#task-description').fill('Сохранение на отдельной странице');
+    await standalone.locator('#save-task').click();
+    await expect(standalone.locator('#save-task')).toBeEnabled();
+    await expect(standalone.locator('#task-modal')).toBeVisible();
+    await standalone.reload({ waitUntil: 'domcontentloaded' });
+    await expect(standalone.locator('#task-description')).toHaveValue('Сохранение на отдельной странице');
     await standalone.close();
     // Broken or inaccessible browser storage must not prevent task creation.
     for (const unavailable of [false, true]) {
