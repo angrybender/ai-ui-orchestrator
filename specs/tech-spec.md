@@ -168,3 +168,59 @@ controllers/database.py принимает подтверждённый POST /ap
 В обновлённом dev-venv прошли 17 Python-тестов test_clear_database, test_agent_recovery, test_app с -W error. Playwright clear_db_ui.js проверил реальную очистку на изолированной БД, подтверждение/отказ, SSE, Spinner, повторные клики, ошибки, создание после очистки и ширину 320px. Снимки Board на 1459px/320px визуально просмотрены с учётом текстовых требований и структурного прототипа карточки. Рабочая БД не очищалась; временные снимки удалены.
 
 Дополнительная проверка удаления файлов: 18 Python-тестов test_clear_database, test_agent_recovery, test_app прошли с -W error. Проверены удаление вложений/остатков, сохранение служебных файлов, rollback БД и восстановление файлов при ошибке перемещения. Playwright clear_db_ui.js прошёл, включая видимый Spinner Clearing… во время запроса; состояние загрузки просмотрено визуально. Временные снимки удалены.
+
+
+### Опциональное ожидание ACP — реализация 2026-10-21
+
+`settings/ui/agent.json` добавляет checkbox `ACP wait background tasks` с default=false; `agent_worker.CONFIG_KEYS` включает флаг в снимок claim. Старые пользовательские JSON изменять при обновлении не требуется. Шаблоны/CSS/клиентские скрипты приложения не менялись: используется существующий metadata-driven checkbox и обычный Save.
+
+`agent_background.py` реализует ограниченный inbox stdout, чтение между RPC, проверку поддержки Qwen, опрос задач и conditional close. `agent_remote.py` подключает этот путь только при `agent.acp_wait_background_tasks is True`. Parser, санитизация и callbacks сохранены; replay при load скрыт от чата. Штатный путь ждёт close=true, EOF/выход ACP=0 и проверку остановки группы без сигналов (`AgentControl.verify_stopped`, `task_init.stop_group(terminate=False)`). При ошибке/отмене worker пробует закрыть Qwen session для очистки detached native shells, затем действует прежняя остановка группы. Неподтверждённый session close после prompt сохраняет agent_uncertain даже при пустом исходном PGID.
+
+Весь период остаётся фазой Agent с прежним deadline и активной монопольной записью. Новый статус БД и миграции не требуются. Это ожидание учтённых Qwen задач; cgroup/универсальный runner из исследовательского плана остаётся отдельным расширением. Актуальные правила — [agent.md](agent.md#опциональное-ожидание-фоновой-работы-acp), UI — [settings.md](settings.md).
+
+Новые регрессии: `tests/test_agent_background.py` — реальные локальные ACP/shell процессы и изолированная БД, включённый/выключенный/отсутствующий флаг, активная очередь, второе фоновое задание, автоматический итоговый ответ, отказ/ошибка close, ошибки команд/продолжения/снимка, разрыв, таймаут, отмена, неподдерживаемый агент, пустой список заданий, resume/replay, снимок настройки и boolean roundtrip. `tests/agent_background_ui.js` — настоящий FastAPI и изолированные настройки, сохранение true/false и перезагрузка, default off, desktop/mobile без переполнения. Тестовый LocalSSH дополнен безопасным закрытием broken stdin и SFTP-операциями resume; production venv не используется.
+
+
+Проверка реализации в обновлённом dev-venv: полный Python-набор с `-W error` — **532 passed, 1 skipped** (проверка WinAPI требует Windows). После уточнения строгой валидации id/kind/status/exitCode снимков дополнительно прошли **21** проверки `test_agent_background.py`, включая штатное завершение без TERM/KILL. Playwright: `agent_background_ui.js`, `settings_required.js`, `board_live.js` — успешно. Settings Agent визуально проверены на 1357px и 375px относительно settings_proto.png и текстовых требований; отсутствие переполнения дополнительно проверено на 320px. Новые файлы реализации и постоянных регрессий добавлены в git.
+
+Реальный smoke через изменённый `run_remote` на настроенной ВМ (Qwen Code 0.23.0, текущая модель), отдельный временный task cwd, флаг включён только в снимке теста: первый end_turn на 12,81 с; завершение фоновой команды с exitCode=0 подтверждено на 45,89 с; conditional close разрешён на 63,97 с после 18 отказов во время автоматического продолжения; содержимое probe.done проверено реальным ReadFile в этом продолжении, итоговый callback содержит BACKGROUND_VERIFIED_OK. `run_remote` вернулся успешно после штатного выхода ACP и проверки остановки группы. Оставшихся native процессов не обнаружено. Рабочие настройки/БД не менялись. Временные локальные и удалённые каталоги, скрипты, Qwen cache исследовательской сессии и снимки удалены; рабочие логи сохранены.
+
+
+### Проверка Claude/Codex с RouterAI — 2026-10-21
+
+Текущий opt-in backend подтверждён как Qwen-specific: на реальных @agentclientprotocol/codex-acp 2.2.2 и @agentclientprotocol/claude-agent-acp 0.94.0 вызов run_remote с флагом true завершается ошибкой отсутствия Qwen active-work support сразу после initialize, до создания/промпта сессии. Оба Qwen RPC также проверены напрямую и возвращают -32601. Это ограничение совместимости, не ошибка провайдера: оба агента успешно отвечали на openai/gpt-6-luna через RouterAI /api/v1, а оба wire API (Responses/Messages) дали HTTP 200.
+
+Нативные фоновые пробы с открытым ACP подтвердили ранний end_turn у обоих. Codex прислал terminal completion и exit_code=0 после окончания команды; для итоговой проверки понадобился второй prompt. Claude вернул completed для запуска Bash ещё при живом процессе, но сохранил backgroundTaskId, затем автоматически проверил результат. Для расширения поддержки требуются отдельные обработчики lifecycle Claude/Codex и стратегия финальной проверки Codex. UI/код приложения не менялись; полноценный успешный прогон текущей опции для этих агентов не заявляется.
+
+Агенты установлены на удалённой ВМ в /home/user/.local/share/acp-test-agents с symlinks в /home/user/.local/bin; локальная установка агентов не выполнялась. Конфигурация авторизации для проб была изолированной и временной, родные аккаунты не использовались. Подробные версии, проверки, наблюдения и источники — [agent.md](agent.md#совместимость-с-claude-и-codex-через-routerai--2026-10-21).
+
+
+### Найденный путь поддержки Claude/Codex — 2026-10-21
+
+На установленных удалённых codex-acp 2.2.2 и claude-agent-acp 0.94.0 реально согласованы AIR capabilities asyncTasks/nativeSubagentSessions/sessionFailure. Исследовательский клиент дождался нативной фоновой команды, отправил в ту же сессию финальный запрос проверки результата, получил end_turn и штатно закрыл оба ACP с exit=0. Это прототип, а не подключённый production backend. Текущий checkbox по-прежнему включает только Qwen backend.
+
+Предлагается выделить AIR backend: реестр (sessionId, asyncTaskId), учёт subagent lifecycle, ожидание и повторная финализация после новых задач, прежний общий deadline и error/cancel cleanup. Для строгой атомарности требуется remote wrapper/патч с conditional-close/drain, поскольку обычный session/close безусловно прерывает работу. У Claude 0.94.0 v1 нет описанного в main автономного async-turn; пустой task registry недостаточен. Для всех произвольных процессов требуется дополнительный supervisor/учёт shell workloads, а не только asyncTasks или PGID. Подробности и реальные времена — [agent.md](agent.md#решение-для-claudecodex-согласованный-asynctasks-и-финальный-ход--2026-10-21).
+
+
+### Конфигурация периода тишины ACP — 2026-10-21
+
+settings/ui/agent.json добавляет required integer acp_background_quiet_timeout с default 60 непосредственно после acp_wait_background_tasks. Используются существующие number input с min=1/step=1 и серверная проверка integer; Save хранит JSON integer. Ключ agent.acp_background_quiet_timeout добавлен в agent_worker.CONFIG_KEYS и согласованный снимок запуска. Пользовательские JSON не изменяются при обновлении; отсутствующее значение читается из метаданных. AIR backend пока отсутствует: значение подготовлено для будущего ожидания тишины и не меняет текущий Qwen drain.
+
+
+### AIR background backend — реализация 2026-10-21
+
+agent_background_air.py — отдельная логика AIR lifecycle, capability negotiation requirements, дерева subagents и активных tools, финального prompt с проверкой результата, монотонного quiet timeout, обработки sessionFailure и штатного close. agent_background.py сохраняет единственный bounded reader и Qwen drain, выбирая AIR по подтверждённым возможностям, без настройки имени агента. agent_remote.py предлагает оба протокола только при checkbox=true, восстанавливает реестр во время load без callback replay, сохраняет только root reply в чате, выбирает правильный cleanup close, ждёт ACP exit=0 и проверяет PGID без сигналов. При выключенном флаге поток выполнения сохраняется. Quiet timeout=60 по умолчанию включён в общий deadline; Qwen не получает дополнительную задержку. Новый статус БД, миграции и изменения адаптеров на ВМ не требуются.
+
+Предыдущие исследовательские записи о неподключённом AIR и неиспользуемой настройке теперь являются историческими. Практические гарантии и ограничения периода тишины определены в agent.md. Новые регрессии tests/test_agent_background_air.py используют реальные локальные ACP-процессы и изолированную БД; вместе с прежними Qwen проверяют позднюю/повторную работу, subagents, quiet reset, отказ/ошибки/EOF, cancel/timeout, replay и отключённый режим.
+
+
+Проверки: полный Python-набор 557 passed, 1 skipped; после завершающих изменений drain/EOF/late-close — 57 passed в background/AIR/cancel. Playwright Agent settings и Board live прошли. Реальный run_remote успешно проверен на ВМ с Codex и Claude через RouterAI openai/gpt-6-luna, quiet=60, и с настроенным Qwen через его conditional-close. Подробные времена и границы проверок — agent.md. UI не менялся, производственные настройки/данные сохранены.
+
+
+### Ограниченная AIR финализация — 2026-10-28
+
+`agent_background_air.py` отделяет failed shell-команд от фатального sessionFailure; после end_turn разрешает обработку результата при ещё активных заданиях. Новый failed запускает сверку без ожидания всех остальных задач; отсутствие активности 30 секунд даёт модели ход для остановки ненужного сервера/watcher. Допускаются максимум три дополнительных prompt и абсолютный drain budget 300 секунд + quiet timeout внутри исходного agent_timeout. Только успешный TaskStop с task_id/shell_id в той же сессии подтверждает stopped без корректирующего completed. Неуспешный stop и неизвестный stopped не разрешают REVIEW. Реестры TaskStop ограничены вместе с остальным lifecycle.
+
+`agent_background.py` проверяет дополнительный deadline при чтении молчащего RPC и предоставляет внешнему executor deadline_error; AIR cleanup ограничен пятью секундами. Выход ACP после успешного close также ограничен пятью секундами, чтобы зависший shutdown не возвращал многочасовое ожидание. `agent_remote.py` проверяет его также в supervisor, чтобы заблокированная запись не удерживала запуск до большого agent_timeout. Прежние отмена, PGID-проверка, replay, санитизация и agent_uncertain сохраняются. Qwen backend и выключенный checkbox используют прежний путь. UI/настройки и схема БД не изменены. Подробные правила — [agent.md](agent.md#claudecodex-air-и-период-тишины).
+
+Проверки: полный Python-набор 570 passed, 1 skipped; после завершающей защиты shutdown — 69 passed AIR/Qwen/cancel. Playwright agent_background_ui.js прошёл. Реальный run_remote с Claude Sonnet через RouterAI успешно обработал failed + остановку сервера (41,17 с, quiet=3) и сервер без failed (127,90 с, quiet=60); тестовые processes/cwd/caches удалены.

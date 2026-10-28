@@ -15,6 +15,20 @@
           "type": "integer",
           "required": true,
           "default": 7200
+        },
+        {
+          "id": "acp_wait_background_tasks",
+          "type": "checkbox",
+          "title": "ACP wait background tasks",
+          "default": false
+        },
+        {
+          "id": "acp_background_quiet_timeout",
+          "type": "integer",
+          "title": "ACP background quiet timeout (seconds)",
+          "description": "ACP background quiet timeout, in seconds. Applies when waiting for background tasks.",
+          "required": true,
+          "default": 60
         }
       ]
     },

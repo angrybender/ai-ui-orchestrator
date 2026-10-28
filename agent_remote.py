@@ -17,6 +17,7 @@ import paramiko
 from task_init import InitError, run_init
 from task_context import prepare_directory, task_prompt, sync_context
 from agent_control import AgentControl, CANCEL_TIMEOUT, POLL_INTERVAL
+from agent_background import BackgroundACP
 
 CONNECT_TIMEOUT = 20
 STDERR_JOIN_TIMEOUT = 0.2
@@ -273,7 +274,9 @@ def _request(stdin, stdout, request_id, method, params, diagnostics, cancelled, 
                 send({"jsonrpc": "2.0", "id": message["id"],
                       "error": {"code": -32601, "message": "Method not supported"}})
             elif message["method"] == "session/update":
-                _event(message, diagnostics, on_message, raw_log)
+                callback = (None if isinstance(stdout, BackgroundACP) and stdout.air
+                            and message.get("params", {}).get("sessionId") != stdout.session_id else on_message)
+                _event(message, diagnostics, callback, raw_log)
             continue
         if type(message.get("id")) is not int or message["id"] != request_id:
             raise ValueError
@@ -323,6 +326,9 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
     cancel_thread = None
     user_cancelled = False
     uncertain = False
+    background = None
+    graceful = False
+    wait_background = config.get('agent.acp_wait_background_tasks') is True
     try:
         ssh = paramiko.SSHClient()
         ssh.load_system_host_keys()
@@ -392,7 +398,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 diagnostics.append("stderr", decoder.decode(b"", final=True))
 
         def execute():
-            nonlocal stderr_thread
+            nonlocal stderr_thread, background, graceful
             stage = "remote command startup"
             try:
                 stderr_thread = threading.Thread(target=stderr_reader, daemon=True)
@@ -409,12 +415,51 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                 stage = "remote process handshake"
                 if not control.handshake(stdin, stdout):
                     return
+                rpc = _request
+                if wait_background:
+                    def decode(line):
+                        if not line.endswith(b'\n'):
+                            raise ValueError('Incomplete ACP message')
+                        message = json.loads(line.decode('utf-8'), parse_constant=_reject_constant,
+                                             object_pairs_hook=_unique_object)
+                        if not isinstance(message, dict) or message.get('jsonrpc') != '2.0':
+                            raise ValueError('Invalid ACP message')
+                        return message
+
+                    def boundary():
+                        with diagnostics.lock:
+                            diagnostics.message_parts.clear()
+
+                    def dispatch(message):
+                        method = message.get('method')
+                        if not isinstance(method, str) or 'result' in message or 'error' in message:
+                            raise ValueError('Invalid ACP notification')
+                        if 'id' in message:
+                            if type(message['id']) not in (int, str):
+                                raise ValueError('Invalid ACP request id')
+                            control.send({'jsonrpc': '2.0', 'id': message['id'],
+                                          'error': {'code': -32601, 'message': 'Method not supported'}})
+                        elif method == 'session/update':
+                            callback = (None if background.air and message.get('params', {}).get('sessionId')
+                                        != background.session_id else on_message)
+                            _event(message, diagnostics, callback, raw_log)
+
+                    background = BackgroundACP(stdout, cancelled, control.requested, decode, dispatch,
+                                               lambda line: _raw_log(raw_log, b'IN ', line), boundary)
+
+                    def rpc(stdin, stdout, *args):
+                        return _request(stdin, background, *args)
+
                 stage = "initialize"
-                initialized = _request(stdin, stdout, 1, "initialize", {
-                    "protocolVersion": 1, "clientCapabilities": {},
-                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"}}, diagnostics, cancelled, on_message, raw_log, control.send)
+                initialized = rpc(stdin, stdout, 1, "initialize", {
+                    "protocolVersion": 1, "clientCapabilities": (BackgroundACP.client_capabilities() if wait_background else {}),
+                    "clientInfo": {"name": "task-orchestrator", "version": "1.0.0"},
+                    **({'_meta': BackgroundACP.initialize_meta()} if wait_background else {})},
+                    diagnostics, cancelled, on_message, raw_log, control.send)
                 if type(initialized.get("protocolVersion")) is not int or initialized["protocolVersion"] != 1:
                     raise ValueError
+                if background:
+                    background.validate_support(initialized, config.get('agent.acp_background_quiet_timeout', 60))
                 stage = "session/load" if task.get("session_id") else "session/new"
                 request_id = 2
                 session_id = None
@@ -423,9 +468,11 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     session_id = task.get("session_id")
                     if not isinstance(session_id, str) or not session_id.strip():
                         raise ACPError("session/load: missing saved session id")
+                    if background:
+                        background.begin_session(session_id, replay=True)
                     try:
                         # session/load replays saved history, not a reply to this run's prompt.
-                        _request(stdin, stdout, request_id, "session/load", {
+                        rpc(stdin, stdout, request_id, "session/load", {
                             "sessionId": session_id, "cwd": cwd, "mcpServers": []}, diagnostics, cancelled, None, raw_log, control.send)
                     except ACPError as exception:
                         if not exception.session_missing:
@@ -437,8 +484,10 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                         if task.get('comment'):
                             session_prompt += '\n\n' + task['comment']
                 if session_id is None:
+                    if background:
+                        background.begin_session(None)
                     stage = "session/new"
-                    session = _request(stdin, stdout, request_id, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
+                    session = rpc(stdin, stdout, request_id, "session/new", {"cwd": cwd, "mcpServers": []}, diagnostics, cancelled, on_message, raw_log, control.send)
                     session_id = session.get("sessionId")
                     # A parsed JSON field is complete, unlike ACP/stderr chunks.
                     if not isinstance(session_id, str) or not session_id.strip() or diagnostics.safe(session_id, partial_suffix=False) != session_id:
@@ -447,9 +496,15 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     return
                 stage = "persist sessionId"
                 on_session(session_id)
+                if background:
+                    if background.session_id != session_id:
+                        background.begin_session(session_id)
+                    background.end_replay()
                 stage = "session/prompt"
-                result = _request(stdin, stdout, request_id + 1, "session/prompt", {
+                result = rpc(stdin, stdout, request_id + 1, "session/prompt", {
                     "sessionId": session_id, "prompt": [{"type": "text", "text": session_prompt}]}, diagnostics, cancelled, on_message, raw_log, control.send)
+                if background:
+                    background.check()
                 reason = result.get("stopReason")
                 if reason == 'cancelled' and control.requested.is_set():
                     outcome.update(sessionId=session_id, stopReason=reason)
@@ -458,6 +513,28 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     if reason in ("cancelled", "canceled", "error", "failed"):
                         outcome["stop_reason"] = reason
                     raise ValueError
+                if background and reason == 'end_turn':
+                    stage = "ACP background tasks"
+                    next_id = request_id + 2
+
+                    def background_request(method, params):
+                        nonlocal next_id
+                        number = next_id
+                        next_id += 1
+                        return rpc(stdin, stdout, number, method, params, diagnostics,
+                                   cancelled, on_message, raw_log, control.send)
+
+                    diagnostics.append('acp', '\nWaiting for ACP background tasks.\n')
+                    background.wait(background_request, ACPError,
+                                    lambda text: diagnostics.append('exception', text + '\n'))
+                    stage = "ACP shutdown"
+                    _close(stdin)
+                    while not channel.exit_status_ready() or not background.eof:
+                        background.pump(POLL_INTERVAL, allow_eof=True)
+                    background.check()
+                    if channel.recv_exit_status() != 0:
+                        raise ValueError('ACP process exited unsuccessfully after background drain.')
+                    graceful = True
                 if channel.exit_status_ready() and channel.recv_exit_status() != 0:
                     raise ValueError
                 outcome.update(sessionId=session_id, stopReason=reason)
@@ -471,6 +548,17 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
                     diagnostics.append("exception", outcome["error"])
                     outcome["failed"] = True
             finally:
+                # On a failed/cancelled opt-in run let the adapter shut down its own
+                # registries too: its background shells may have another PGID.
+                if (background and background.session_id and control.prompt_sent
+                        and not background.session_closed and not cancelled.is_set()):
+                    try:
+                        method, params = background.cleanup_request()
+                        closed = rpc(stdin, stdout, 2000000000, method, params,
+                                     diagnostics, cancelled, None, raw_log, control.send_cleanup)
+                        background.confirm_cleanup(closed)
+                    except Exception:
+                        diagnostics.append('exception', 'ACP background session cleanup unconfirmed.\n')
                 finished.set()
 
         worker = threading.Thread(target=execute, daemon=True)
@@ -497,6 +585,9 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             if user_cancelled:
                 if (control.cancel_sent.is_set() and not control.prompt_sent) or time.monotonic() >= cancel_deadline:
                     break
+            elif background is not None and background.deadline_error(grace=5):
+                error = outcome.get('error') or background.deadline_error()
+                break
             elif time.monotonic() - started >= timeout:
                 error = "Remote agent timed out."
                 break
@@ -517,12 +608,19 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         cancelled.set()
         if control is not None:
             try:
-                uncertain = not control.stop()
+                uncertain = not (control.verify_stopped() if graceful else control.stop())
             except Exception:
                 uncertain = True
+            if (background and background.session_id and control.prompt_sent
+                    and not background.session_closed):
+                uncertain = True
+                if cycle:
+                    cycle.agent_stopped(False)
             if uncertain:
                 error = (error or 'Remote agent cleanup failed.') + '\nRemote stop unconfirmed; retry blocked pending verification.'
         _close(channel)
+        if background is not None:
+            background.close()
         if stderr_thread is not None:
             stderr_thread.join(STDERR_JOIN_TIMEOUT)
         _close(ssh)
