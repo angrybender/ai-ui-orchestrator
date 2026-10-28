@@ -215,3 +215,12 @@ agent_background_air.py — отдельная логика AIR lifecycle, capab
 
 
 Проверки: полный Python-набор 557 passed, 1 skipped; после завершающих изменений drain/EOF/late-close — 57 passed в background/AIR/cancel. Playwright Agent settings и Board live прошли. Реальный run_remote успешно проверен на ВМ с Codex и Claude через RouterAI openai/gpt-6-luna, quiet=60, и с настроенным Qwen через его conditional-close. Подробные времена и границы проверок — agent.md. UI не менялся, производственные настройки/данные сохранены.
+
+
+### Ограниченная AIR финализация — 2026-10-28
+
+`agent_background_air.py` отделяет failed shell-команд от фатального sessionFailure; после end_turn разрешает обработку результата при ещё активных заданиях. Новый failed запускает сверку без ожидания всех остальных задач; отсутствие активности 30 секунд даёт модели ход для остановки ненужного сервера/watcher. Допускаются максимум три дополнительных prompt и абсолютный drain budget 300 секунд + quiet timeout внутри исходного agent_timeout. Только успешный TaskStop с task_id/shell_id в той же сессии подтверждает stopped без корректирующего completed. Неуспешный stop и неизвестный stopped не разрешают REVIEW. Реестры TaskStop ограничены вместе с остальным lifecycle.
+
+`agent_background.py` проверяет дополнительный deadline при чтении молчащего RPC и предоставляет внешнему executor deadline_error; AIR cleanup ограничен пятью секундами. Выход ACP после успешного close также ограничен пятью секундами, чтобы зависший shutdown не возвращал многочасовое ожидание. `agent_remote.py` проверяет его также в supervisor, чтобы заблокированная запись не удерживала запуск до большого agent_timeout. Прежние отмена, PGID-проверка, replay, санитизация и agent_uncertain сохраняются. Qwen backend и выключенный checkbox используют прежний путь. UI/настройки и схема БД не изменены. Подробные правила — [agent.md](agent.md#claudecodex-air-и-период-тишины).
+
+Проверки: полный Python-набор 570 passed, 1 skipped; после завершающей защиты shutdown — 69 passed AIR/Qwen/cancel. Playwright agent_background_ui.js прошёл. Реальный run_remote с Claude Sonnet через RouterAI успешно обработал failed + остановку сервера (41,17 с, quiet=3) и сервер без failed (127,90 с, quiet=60); тестовые processes/cwd/caches удалены.

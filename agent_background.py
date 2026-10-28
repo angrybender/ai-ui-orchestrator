@@ -9,6 +9,7 @@ from agent_background_air import AirBackground, CAPABILITIES, close_confirmed, s
 HEARTBEAT_KEY = 'qwen.daemon.activeWorkHeartbeat'
 CATEGORIES = ['agent', 'notification', 'shell', 'workflow']
 POLL_SECONDS = 1.0
+CLEANUP_TIMEOUT_SECONDS = 5
 
 
 class BackgroundACP:
@@ -35,6 +36,7 @@ class BackgroundACP:
         self.source = None
         self.session_closed = False
         self.air = None
+        self.cleanup_deadline = None
         self.replaying = False
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
@@ -74,9 +76,22 @@ class BackgroundACP:
     def cleanup_request(self):
         if self.air:
             self.air.cleaning = True
+            self.cleanup_deadline = time.monotonic() + CLEANUP_TIMEOUT_SECONDS
             return 'session/close', {'sessionId': self.session_id}
         return 'qwen/control/session/close', {
             'sessionId': self.session_id, 'requireFlush': True, 'drainTimeoutMs': 5000}
+
+    def deadline_error(self, *, grace=0):
+        if not self.air:
+            return None
+        deadline = self.cleanup_deadline if self.air.cleaning else self.air.deadline
+        if deadline is not None and not self.air.cleaning:
+            deadline += grace
+        if deadline is not None and time.monotonic() >= deadline:
+            return ('ACP background session cleanup timed out.' if self.air.cleaning else
+                    'ACP AIR shutdown timed out.' if self.session_closed else
+                    'ACP AIR background reconciliation timed out.')
+        return None
 
     def confirm_cleanup(self, result):
         self.session_closed = (close_confirmed(result) if self.air else
@@ -107,6 +122,9 @@ class BackgroundACP:
             return b''
         deadline = None if timeout is None else time.monotonic() + timeout
         while not self.cancelled.is_set() and not self.closed.is_set():
+            error = self.deadline_error()
+            if error:
+                raise ValueError(error)
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 return None

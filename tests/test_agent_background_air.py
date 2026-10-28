@@ -30,8 +30,10 @@ def background(task, gate, child=False):
     # Completed Bash launches must not release the async task.
     update('tool_call_update',sid=sid,toolCallId=task,status='completed')
     def finish():
-        while not Path(gate).exists() and not Path('force.closed').exists(): time.sleep(.01)
-        if Path('force.closed').exists(): return
+        while not Path(gate).exists() and not Path('force.closed').exists():
+            if mode=='chatter':update('async_task_progress',sid=sid,asyncTaskId=task,description='still running')
+            time.sleep(.01)
+        if Path('force.closed').exists() or Path(task+'.stopped').exists(): return
         Path(task+'.done').touch()
         if mode in ('stop-correction','stopped'):
             update('async_task_state_update',sid=sid,asyncTaskId=task,state='stopped')
@@ -70,12 +72,21 @@ try:
                 Path('release.first').touch()
             if mode not in ('no-jobs','silent','provider-error'):
                 background('first','release.first',mode=='child')
+            if mode=='failed-server':background('server','release.server')
             if mode=='failed-before-end':
                 for t in threads:t.join()
             text('started')
         else:
-            assert 'inspect its error, recover or retry' in p['prompt'][0]['text']
             Path('verify.'+str(count)).touch()
+            if mode=='silent-final':continue
+            if count==2 and mode in ('server-stop-before','server-stop-after','server-stop-failed','failed-server'):
+                target='server' if mode=='failed-server' else 'first'
+                update('tool_call',toolCallId='stop',name='TaskStop',status='pending')
+                update('tool_call_update',toolCallId='stop',rawInput={'task_id':target})
+                Path(target+'.stopped').touch();Path('release.'+target).touch()
+                if mode!='server-stop-after':update('async_task_state_update',asyncTaskId=target,state='stopped')
+                update('tool_call_update',toolCallId='stop',status='failed' if mode=='server-stop-failed' else 'completed')
+                if mode=='server-stop-after':update('async_task_state_update',asyncTaskId=target,state='stopped')
             if mode=='second' and count==2:background('second','release.second')
             text('verified final answer')
         if mode=='silent':update('usage_update',used=1,size=100)
@@ -83,12 +94,14 @@ try:
         result={'stopReason':'refusal' if mode in ('refusal','failed-refusal') and count>1 else 'end_turn'}
         if mode=='provider-error':result['_meta']={'jetbrains':{'air':{'sessionFailure':{'severity':'error'}}}}
     elif m=='session/close':
+        if mode=='silent-close':continue
         if mode=='close-race':background('race','release.race')
         Path('force.closed' if any(t.is_alive() for t in threads) and not Path('first.done').exists() else 'close.allowed').touch()
         result={}
     elif m=='session/cancel':Path('cancel.received').touch();continue
     else:raise RuntimeError('unexpected method '+m)
     emit({'id':r['id'],'result':result})
+    if m=='session/close' and mode=='hung-shutdown':time.sleep(60)
     if m=='session/close' and mode=='postclose-race':background('late-race','release.late-race')
 finally:
  Path('peer.exited').touch()
@@ -149,18 +162,63 @@ def test_failure_cannot_reach_review(air_harness, mode):
 
 
 @pytest.mark.parametrize('mode', ['failed', 'failed-before-end', 'failed-correction'])
-def test_failed_command_is_processed_by_model_before_review(air_harness, mode):
+def test_failed_command_is_processed_by_model(air_harness, mode):
     h = air_harness(mode)
     h.start()
     (h.cwd/'release.first').touch()
-    wait_for(h, 'verify.2')
     h.worker.join(5)
     assert not h.worker.is_alive()
     assert board_store.get_task('CANCEL-1')['status'] == 'REVIEW', saved_run()['error']
     assert saved_run()['state'] == 'SUCCEEDED'
-    assert (h.cwd/'close.allowed').exists() and (h.cwd/'peer.exited').exists()
-    assert any('verified final answer' in m['text']
-               for m in board_store.get_chat('CANCEL-1')['messages'])
+    assert (h.cwd/'verify.2').exists()
+    assert saved_run()['agent_uncertain'] == 0
+
+
+@pytest.mark.parametrize('mode', ['server-stop-before', 'server-stop-after', 'failed-server'])
+def test_pending_server_can_be_stopped_during_bounded_finalization(air_harness, monkeypatch, mode):
+    monkeypatch.setattr(agent_background_air, 'IDLE_RECONCILE_SECONDS', .15)
+    h = air_harness(mode)
+    h.start()
+    if mode=='failed-server':(h.cwd/'release.first').touch()
+    h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert (h.cwd/'verify.2').exists()
+    assert (h.cwd/('server.stopped' if mode=='failed-server' else 'first.stopped')).exists()
+    assert board_store.get_task('CANCEL-1')['status'] == 'REVIEW', saved_run()['error']
+    assert saved_run()['agent_stop_confirmed'] == 1
+    assert saved_run()['agent_uncertain'] == 0
+
+
+def test_unconfirmed_taskstop_cannot_authorize_review(air_harness, monkeypatch):
+    monkeypatch.setattr(agent_background_air, 'IDLE_RECONCILE_SECONDS', .15)
+    h=air_harness('server-stop-failed');h.start();h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert board_store.get_task('CANCEL-1')['status']=='WAIT'
+    assert 'stop was not resolved' in saved_run()['error']
+
+
+def test_stubborn_server_stops_after_three_finalization_turns(air_harness, monkeypatch):
+    monkeypatch.setattr(agent_background_air, 'IDLE_RECONCILE_SECONDS', .15)
+    h=air_harness('stubborn');h.start();h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert board_store.get_task('CANCEL-1')['status']=='WAIT'
+    assert 'finalization limit reached' in saved_run()['error']
+    assert (h.cwd/'verify.4').exists()
+    assert not (h.cwd/'verify.5').exists()
+    assert saved_run()['agent_uncertain']==0
+
+
+@pytest.mark.parametrize('mode', ['chatter','silent-final'])
+def test_reconciliation_deadline_bounds_progress_and_silent_rpc(air_harness, monkeypatch, mode):
+    monkeypatch.setattr(agent_background_air, 'IDLE_RECONCILE_SECONDS', .15)
+    monkeypatch.setattr(agent_background_air, 'MAX_RECONCILE_SECONDS', .2)
+    h=air_harness(mode);h.start()
+    if mode=='silent-final':(h.cwd/'release.first').touch()
+    h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert board_store.get_task('CANCEL-1')['status']=='WAIT'
+    assert 'background reconciliation timed out' in saved_run()['error']
+    assert saved_run()['agent_uncertain']==0
 
 
 @pytest.mark.parametrize('enabled', [False, None])
@@ -223,3 +281,25 @@ def test_air_requires_close_support_before_prompt(air_harness):
     assert not (h.cwd/'prompt.ready').exists()
     assert board_store.get_task('CANCEL-1')['status']=='WAIT'
     assert 'ACP AIR async-task support' in saved_run()['error']
+
+
+def test_silent_close_and_cleanup_are_bounded(air_harness, monkeypatch):
+    import agent_background
+    monkeypatch.setattr(agent_background_air, 'MAX_RECONCILE_SECONDS', .2)
+    monkeypatch.setattr(agent_background, 'CLEANUP_TIMEOUT_SECONDS', .2)
+    h=air_harness('silent-close');h.start();(h.cwd/'release.first').touch()
+    h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert board_store.get_task('CANCEL-1')['status']=='WAIT'
+    assert saved_run()['agent_uncertain']==1
+    assert 'timed out' in saved_run()['error']
+
+
+def test_acknowledged_close_cannot_hang_acp_exit(air_harness, monkeypatch):
+    monkeypatch.setattr(agent_background_air, 'SHUTDOWN_TIMEOUT_SECONDS', .2)
+    h=air_harness('hung-shutdown');h.start();(h.cwd/'release.first').touch()
+    h.worker.join(5)
+    assert not h.worker.is_alive()
+    assert board_store.get_task('CANCEL-1')['status']=='WAIT'
+    assert 'ACP AIR shutdown timed out.' in saved_run()['error']
+    assert saved_run()['agent_uncertain']==0

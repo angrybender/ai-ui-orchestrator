@@ -585,6 +585,9 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             if user_cancelled:
                 if (control.cancel_sent.is_set() and not control.prompt_sent) or time.monotonic() >= cancel_deadline:
                     break
+            elif background is not None and background.deadline_error(grace=5):
+                error = outcome.get('error') or background.deadline_error()
+                break
             elif time.monotonic() - started >= timeout:
                 error = "Remote agent timed out."
                 break

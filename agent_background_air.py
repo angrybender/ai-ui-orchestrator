@@ -1,18 +1,26 @@
 """Negotiated AIR task lifecycle and bounded quiet-period drain for ACP v1."""
+import json
 import time
 
 
 CAPABILITIES = ['asyncTasks', 'nativeSubagentSessions', 'sessionFailure']
 FINAL_PROMPT = (
-    'Background work has finished. Complete the original task: inspect the results '
+    'Complete the original task: inspect the results '
     'of all background work, verify the outcome, and finish any remaining work. '
-    'A failed background command does not by itself mean the original task failed: '
-    'inspect its error, recover or retry as needed, and verify the requested result. '
+    'A failed background command is a result to inspect; recover or retry only '
+    'when needed for the original task. Inspect any still-running tasks. Stop '
+    'disposable servers/watchers you started if they are no longer needed, using '
+    'TaskStop when available. Do not stop necessary finite work: wait for and '
+    'verify its result. Do not launch duplicate commands. '
     'Do not merely report that work was started. If you start more background '
     'work, its results must also be checked before the task is complete. '
     'Provide the final answer when the task is finished.'
 )
 LIMIT = 8192
+IDLE_RECONCILE_SECONDS = 30
+MAX_RECONCILE_SECONDS = 300
+MAX_FINALIZATION_TURNS = 3
+SHUTDOWN_TIMEOUT_SECONDS = 5
 
 
 def air_meta(value):
@@ -52,6 +60,11 @@ class AirBackground:
         self.tools = {}
         self.unconfirmed_stops = {}
         self.work_version = 0
+        self.failed_version = 0
+        self.stop_tools = set()
+        self.stop_targets = {}
+        self.confirmed_stops = set()
+        self.deadline = None
         self.last_activity = time.monotonic()
         self.replaying = False
         self.cleaning = False
@@ -72,6 +85,11 @@ class AirBackground:
                 or bool(self.tools))
 
     def check(self):
+        if self.cleaning:
+            return
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise ValueError('ACP AIR shutdown timed out.' if self.owner.session_closed else
+                             'ACP AIR background reconciliation timed out.')
         # Claude can reconcile a disappeared task to stopped before its SDK
         # completion edge arrives. Await the correction, but never count an
         # unconfirmed stop as a successful result.
@@ -126,6 +144,7 @@ class AirBackground:
             if kind == 'async_task_spawned':
                 if self.tasks.get(key) != 'running':
                     self.unconfirmed_stops.pop(key, None)
+                    self.confirmed_stops.discard(key)
                     self.tasks[key] = 'running'
                     self.work_version += 1
             elif key not in self.tasks:
@@ -136,14 +155,13 @@ class AirBackground:
                     raise ValueError('Invalid ACP AIR task state.')
                 if self.tasks[key] != state:
                     self.work_version += 1
+                    if state == 'failed' and not self.replaying:
+                        self.failed_version = self.work_version
                 self.tasks[key] = state
-                if state == 'stopped' and not self.replaying:
+                if state == 'stopped' and not self.replaying and key not in self.confirmed_stops:
                     self.unconfirmed_stops.setdefault(key, time.monotonic())
                 else:
                     self.unconfirmed_stops.pop(key, None)
-                # A command failure is input for the model's result-processing
-                # turn, not a fatal failure of the ACP session. work_version
-                # ensures that even an early/late failure gets finalized.
         elif kind in ('subagent_spawned', 'subagent_state_update'):
             child = self.identifier(update.get('subagentSessionId'))
             if kind == 'subagent_spawned':
@@ -166,14 +184,31 @@ class AirBackground:
                     self.fail('ACP background subagent failed or was disconnected.')
         elif kind in ('tool_call', 'tool_call_update'):
             key = (sid, self.identifier(update.get('toolCallId')))
+            meta = update.get('_meta', {})
+            claude = meta.get('claudeCode', {}) if isinstance(meta, dict) else {}
+            name = update.get('name') or (claude.get('toolName') if isinstance(claude, dict) else None)
+            if name == 'TaskStop':
+                self.stop_tools.add(key)
+            raw = update.get('rawInput')
+            if key in self.stop_tools and isinstance(raw, dict):
+                task_id = raw.get('task_id') or raw.get('shell_id')
+                if isinstance(task_id, str) and task_id.strip():
+                    self.stop_targets[key] = (sid, task_id)
             status = update.get('status', 'pending' if kind == 'tool_call' else None)
+            if status in ('completed', 'failed'):
+                target = self.stop_targets.pop(key, None)
+                self.stop_tools.discard(key)
+                if status == 'completed' and target in self.tasks:
+                    self.confirmed_stops.add(target)
+                    self.unconfirmed_stops.pop(target, None)
             if status in ('pending', 'in_progress'):
                 self.tools[key] = status
             elif status in ('completed', 'failed'):
                 self.tools.pop(key, None)
             elif status is not None:
                 raise ValueError('Invalid ACP AIR tool status.')
-        if len(self.tasks) + len(self.children) + len(self.tools) > LIMIT:
+        if (len(self.tasks) + len(self.children) + len(self.tools)
+                + len(self.stop_tools) + len(self.stop_targets) > LIMIT):
             raise ValueError('ACP AIR lifecycle registry limit exceeded.')
         # Usage, configuration and heartbeat traffic must not postpone shutdown.
         if (kind in ('agent_message_chunk', 'agent_thought_chunk', 'tool_call',
@@ -185,21 +220,42 @@ class AirBackground:
 
     def wait(self, request, on_log):
         verified = 0
+        turns = 0
+        started = time.monotonic()
         self.last_activity = time.monotonic()
         on_log(f'Waiting for ACP AIR work and {self.quiet_timeout}s of inactivity.')
         while True:
             self.owner.check()
             # Consume queued late events before deciding whether work is done.
             self.owner.pump(0.01)
-            if self.pending():
+            if self.unconfirmed_stops:
+                # A level reconciliation or an unacknowledged TaskStop must
+                # resolve before another turn can authorize completion.
                 self.owner.pump(0.1)
                 continue
-            if self.work_version != verified:
+            pending = self.pending()
+            needs_review = self.work_version != verified
+            if (pending or needs_review) and self.deadline is None:
+                # Absolute budget, never reset by progress or another model turn.
+                self.deadline = started + MAX_RECONCILE_SECONDS + self.quiet_timeout
+            stalled = pending and time.monotonic() - self.last_activity >= IDLE_RECONCILE_SECONDS
+            if pending and not stalled and self.failed_version <= verified:
+                self.owner.pump(0.1)
+                continue
+            if needs_review or stalled:
+                if turns >= MAX_FINALIZATION_TURNS:
+                    raise ValueError('ACP AIR background finalization limit reached; work remains unverified.')
+                turns += 1
                 version = self.work_version
+                on_log(f'ACP AIR finalization {turns}/{MAX_FINALIZATION_TURNS}; '
+                       f'{sum(s in ("running", "paused") for s in self.tasks.values())} active tasks, '
+                       f'{len(self.tools)} active tools.')
+                states = [(session, task, state) for (session, task), state in self.tasks.items()]
+                prompt = FINAL_PROMPT + '\nKnown background tasks (sessionId, taskId, state): ' + json.dumps(states[:32])
                 self.owner.boundary()
                 result = request('session/prompt', {
                     'sessionId': self.owner.session_id,
-                    'prompt': [{'type': 'text', 'text': FINAL_PROMPT}]})
+                    'prompt': [{'type': 'text', 'text': prompt}]})
                 self.result(result)
                 self.owner.check()
                 if result.get('stopReason') != 'end_turn':
@@ -222,4 +278,5 @@ class AirBackground:
                     or self.last_activity != close_activity):
                 raise ValueError('ACP work appeared during session close.')
             self.owner.session_closed = True
+            self.deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
             return
