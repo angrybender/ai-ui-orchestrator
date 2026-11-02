@@ -180,3 +180,14 @@ Trees API сопоставлены пути/mode/blob SHA всех 328 опуб�
 временные checkout, node_modules/dist и runtime проверки удалены. Прочитаны
 относящиеся agent.md, tech-spec.md и AGENTS.md исходного проекта. UI и Python-код
 приложения не менялись; новые Python/Playwright прогоны не требовались.
+
+### 2026-11-02 — Codex backend acp-wrapper
+
+Добавлен полный Codex ACP 2.2.2 рядом с Claude, отдельный installer/lockfile/CI,
+строгий snapshot/conditional close, OS ownership и подтверждённый stop. Исправлены
+гонка Bash после убийства sleep, cleanup app-server helpers и ESRCH при чтении
+исчезающего процесса. Codex: 1516 passed / 36 skipped; installer 56 passed.
+VM ACP-01..26 проверены; INT-01..07 — с адаптациями, INT-04/05 частично:
+retry blocked подтверждён, оставшиеся процессы очищены независимо.
+Python 86 passed, Claude targeted 790 passed / 10 skipped, Playwright Agent
+settings прошёл. Детали — [codex-support.md](codex-support.md).
