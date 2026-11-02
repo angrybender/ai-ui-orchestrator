@@ -224,3 +224,82 @@ agent_background_air.py — отдельная логика AIR lifecycle, capab
 `agent_background.py` проверяет дополнительный deadline при чтении молчащего RPC и предоставляет внешнему executor deadline_error; AIR cleanup ограничен пятью секундами. Выход ACP после успешного close также ограничен пятью секундами, чтобы зависший shutdown не возвращал многочасовое ожидание. `agent_remote.py` проверяет его также в supervisor, чтобы заблокированная запись не удерживала запуск до большого agent_timeout. Прежние отмена, PGID-проверка, replay, санитизация и agent_uncertain сохраняются. Qwen backend и выключенный checkbox используют прежний путь. UI/настройки и схема БД не изменены. Подробные правила — [agent.md](agent.md#claudecodex-air-и-период-тишины).
 
 Проверки: полный Python-набор 570 passed, 1 skipped; после завершающей защиты shutdown — 69 passed AIR/Qwen/cancel. Playwright agent_background_ui.js прошёл. Реальный run_remote с Claude Sonnet через RouterAI успешно обработал failed + остановку сервера (41,17 с, quiet=3) и сервер без failed (127,90 с, quiet=60); тестовые processes/cwd/caches удалены.
+
+
+### Форк Claude ACP с явным drain — 2026-10-29
+
+`adapters/claude-background` содержит patch, installer и контракт для pinned
+upstream 0.96.0. Сборка относится только к Node-адаптеру на agent host;
+браузерный JS и запуск web-app не требуют нового build/server. Зависимости
+адаптера устанавливаются по upstream package-lock в отдельный prefix.
+`agent_background_claude.py` выбирается по явному подтверждению расширения,
+использует существующий единственный stdout reader, callbacks, deadline,
+cleanup и монополию БД. Дополнительные эвристические пределы обычного AIR
+backend к нему не применяются. Схема БД, статусы, UI и настройки не меняются.
+Нормативный контракт и границы гарантий — [agent.md](agent.md#claude-форк-с-явным-ожиданием-фоновой-работы).
+
+
+Итоговые проверки: Python **585 passed, 1 skipped**, background/AIR/Qwen/cancel
+**83 passed**, Playwright Agent settings успешно. На ВМ installer прошёл
+build/check и **790** ACP/async-task тестов; проверены native finite работа,
+повторные фоновые задания, failed+TaskStop, foreground и production quiet=60.
+Два падения полного upstream-набора воспроизведены без патча и описаны в agent.md.
+Неподтверждённая первая проверка PGID для форка повторяется один раз без сигналов;
+две неудачи сохраняют ошибку и неопределённость.
+
+
+### Материалы отдельного репозитория форка — 2026-10-29
+
+`adapters/claude-background` дополнен подробной установочной документацией,
+спецификацией RPC, результатами проверок, Apache LICENSE/NOTICE и Bash launcher
+для RouterAI. Повторная установка из подготовленного standalone-репозитория с
+`--test`: build/check и 790 тестов прошли, 10 skipped. Launcher проверен отдельно
+без реального provider key. Публикация в angrybender/acp-wrapper заблокирована
+HTTP 403 из-за прав PAT; commit сохранён в проверенном `acp-wrapper.bundle`.
+Полный результат и ограничения доступа описаны в agent.md. Код приложения,
+настройки production и установленный на ВМ runtime не изменены.
+
+
+Публикация acp-wrapper завершена после выдачи прав PAT: main содержит commit
+`20f455840131510a83ee071691bb46af4906d2d2`. Git ref и шесть опубликованных
+source/documentation файлов проверены через git/GitHub API. Предыдущая запись
+о HTTP 403 описывает устранённую блокировку. Временный checkout удалён.
+
+
+Документация acp-wrapper обновлена по запросу пользователя: из README удалён
+раздел «4. Настройка RouterAI», оставшиеся разделы перенумерованы, пример
+Agent shell использует установленный executable напрямую. Изменение опубликовано
+в main, commit `aee3f88e81e10273830776d1eb41e2054d8fa1bc`. Проверены нумерация, локальные ссылки,
+git diff --check и совпадение README с GitHub API. Код не менялся; тесты
+приложения не перезапускались. Локальные README и bundle синхронизированы.
+
+
+### Полная кодовая база Claude ACP fork — 2026-10-29
+
+По запросу пользователя patch-kit преобразован в полный source-форк в
+https://github.com/angrybender/acp-wrapper, main commit `971c9ea7c9ff02a38ea1d42d1498ca442d83812b`.
+Скопирована полная кодовая база upstream 0.96.0; все 320 исходных файлов
+проверены по upstream tree. README upstream сохранён как README.upstream.md,
+workflow/dependabot definitions перенесены в docs/upstream-workflows для
+справки без активации release/npm automation. В package.json указан репозиторий
+форка и private=true. Исходный патч применён к src/ и сохранён отдельно;
+изменения исходников ограничены четырьмя файлами прежнего патча, reverse-check
+подтверждает соответствие. UPSTREAM.json фиксирует base revision и SHA256.
+
+Installer теперь копирует build inputs из текущего checkout, не скачивает
+upstream и не применяет patch второй раз. Поддерживаются прямая сборка npm,
+изолированная runtime-установка, provenance source_revision/source_dirty и
+исполняемый symlink. README обновлён; удалённый ранее раздел настройки RouterAI
+не восстановлен. Контракт ACP и код оркестратора не менялись.
+
+Проверки: npm ci/build/check успешны. Полный source-suite: 3321 passed,
+33 skipped, 2 failed — те же ранее воспроизведённые upstream failures,
+описанные в docs/testing.md. Installer --test: 790 passed, 10 skipped;
+prefix/bin с пробелами, запуск executable, provenance и byte equality compiled
+JS с прямой сборкой проверены. Для чистого commit проверены source_revision и
+source_dirty=false. Через git ls-remote подтверждён commit main, через GitHub
+Trees API сопоставлены пути/mode/blob SHA всех 328 опубликованных файлов.
+Локальная полная кодовая база и bundle в adapters/claude-background обновлены;
+временные checkout, node_modules/dist и runtime проверки удалены. Прочитаны
+относящиеся agent.md, tech-spec.md и AGENTS.md исходного проекта. UI и Python-код
+приложения не менялись; новые Python/Playwright прогоны не требовались.

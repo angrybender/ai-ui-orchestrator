@@ -608,7 +608,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         cancelled.set()
         if control is not None:
             try:
-                uncertain = not (control.verify_stopped() if graceful else control.stop())
+                uncertain = not (background.verify_stopped(control) if graceful else control.stop())
             except Exception:
                 uncertain = True
             if (background and background.session_id and control.prompt_sent

@@ -4,6 +4,7 @@ import threading
 import time
 
 from agent_background_air import AirBackground, CAPABILITIES, close_confirmed, supported
+from agent_background_claude import ClaudeBackground, CAPABILITY, supported as claude_supported
 
 
 HEARTBEAT_KEY = 'qwen.daemon.activeWorkHeartbeat'
@@ -47,7 +48,7 @@ class BackgroundACP:
 
     @staticmethod
     def client_capabilities():
-        return {'_meta': {'jetbrains': {'air': {'version': 1, 'capabilities': CAPABILITIES[:]}}}}
+        return {'_meta': {CAPABILITY: 1, 'jetbrains': {'air': {'version': 1, 'capabilities': CAPABILITIES[:]}}}}
 
     def validate_support(self, result, quiet_timeout=60):
         meta = result.get('_meta')
@@ -57,7 +58,8 @@ class BackgroundACP:
                 and all(category in support['categories'] for category in CATEGORIES)):
             return
         if supported(result):
-            self.air = AirBackground(self, quiet_timeout)
+            self.air = (ClaudeBackground(self, quiet_timeout) if claude_supported(result)
+                        else AirBackground(self, quiet_timeout))
             return
         raise ValueError('ACP wait background tasks requires Qwen active-work support or ACP AIR async-task support.')
 
@@ -72,6 +74,13 @@ class BackgroundACP:
         self.replaying = False
         if self.air:
             self.air.restored()
+
+    def verify_stopped(self, control):
+        if control.verify_stopped():
+            return True
+        # Retry an unconfirmed read-only check through a fresh control channel.
+        # Success still requires confirmed absence, without sending signals.
+        return isinstance(self.air, ClaudeBackground) and control.verify_stopped()
 
     def cleanup_request(self):
         if self.air:
