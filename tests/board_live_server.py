@@ -24,10 +24,14 @@ def configure(directory: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument('--wait-queue', action='store_true', help='Use local test executors for agent/run.')
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "agent-uncertain", "message", "context-conflict"))
     parser.add_argument("--run-id")
     args = parser.parse_args()
+    if args.wait_queue:
+        from wait_queue_worker import configure_launcher
+        configure_launcher()
     if args.operation:
         # Only accept an existing database owned by this fixture, never /app/data.
         directory = args.directory.resolve()
