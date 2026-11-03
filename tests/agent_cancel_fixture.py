@@ -72,6 +72,18 @@ class LocalChannel(Channel):
     def makefile(self, mode):
         return self.process.stdout
 
+    def close(self):
+        self.closed = True
+        if self.process:
+            # A disconnected fake peer may leave buffered stdin broken. Still
+            # close the other pipes and reap the subprocess in that case.
+            for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+            self.process.wait(timeout=5)
+
 
 class LocalSSH:
     def __init__(self):
@@ -111,6 +123,12 @@ class LocalSSH:
                 return Path(path).lstat()
             def putfo(self, stream, path):
                 Path(path).write_bytes(stream.read())
+            def listdir_attr(self, path):
+                from types import SimpleNamespace
+                return [SimpleNamespace(filename=item.name, st_mode=item.lstat().st_mode)
+                        for item in Path(path).iterdir()]
+            def remove(self, path):
+                Path(path).unlink()
             def close(self):
                 pass
         return SFTP()

@@ -27,6 +27,8 @@ CONFIG = {
     "agent.agent_timeout": 60,
     "agent.prompt": "Системные инструкции\nВыполни проверки.",
     "agent.continue_session_arg": "--continue",
+    "agent.acp_wait_background_tasks": False,
+    "agent.acp_background_quiet_timeout": 60,
     "tasks.init_script_path": "", "tasks.init_script_text": "", "tasks.init_script_timeout": 300,
 }
 
@@ -490,7 +492,7 @@ def test_launcher_detaches_without_reserving_or_passing_task_id(database, monkey
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args == [sys.executable, str(Path(launcher.__file__).with_name("agent_worker.py")),
-                    "--database", str(database[0].resolve()), "--files", str(database[1].resolve())]
+                    "--continue-after-wait", "--database", str(database[0].resolve()), "--files", str(database[1].resolve())]
     assert kwargs["start_new_session"] is True
     assert kwargs["close_fds"] is True
     assert all(kwargs[stream] == subprocess.DEVNULL for stream in ("stdin", "stdout", "stderr"))
