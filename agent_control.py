@@ -90,7 +90,7 @@ class AgentControl:
         with self.startup_lock:
             self.cancelled.set()
             pid = self.pid
-        confirmed = stop_group(self.transport, pid) if pid else True
+        confirmed = stop_group(self.transport, pid, term_grace=3) if pid else True
         if self.cycle:
             self.cycle.agent_stopped(confirmed)
         return confirmed

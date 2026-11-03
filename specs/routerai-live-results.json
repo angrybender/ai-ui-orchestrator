@@ -1,0 +1,1262 @@
+{
+  "date": "2026-11-03",
+  "endpoint": "https://routerai.ru/api/v1",
+  "models": {
+    "codex": "openai/gpt-6-luna",
+    "claude": "anthropic/claude-sonnet-4.6"
+  },
+  "runtime": {
+    "node": "v22.23.2",
+    "acp-codex-wrapper": {
+      "package": "2.2.2",
+      "fork": {
+        "repository": "https://github.com/agentclientprotocol/codex-acp.git",
+        "revision": "202e66e63343ec4f5a5e35ab590251d813d129ca",
+        "version": "2.2.2",
+        "contract": {
+          "name": "orchestratorBackgroundTasks",
+          "version": 1
+        },
+        "source_repository": "https://github.com/angrybender/acp-wrapper",
+        "source_revision": "9524663c5207e6b164648ab7928a16a39b6a69ab",
+        "source_dirty": false,
+        "source_sha256": "3e738c1736679528696663401285f2ece386087aa67e9cbd9a6feba83852942c"
+      },
+      "sdk": "0.160.1"
+    },
+    "claude-agent-acp-wait": {
+      "package": "0.96.0",
+      "fork": {
+        "upstream": "https://github.com/agentclientprotocol/claude-agent-acp.git",
+        "revision": "f6958db1ee8d3e9ead6767a3a294f98b9a21adb9",
+        "patch_sha256": "babf0735a961af44d7851e887e0a9e2fb75fb43b9cd1728f1d7ecbcc5921dcc4",
+        "contract": "orchestratorBackgroundTasks",
+        "version": 1
+      },
+      "sdk": "0.3.310"
+    }
+  },
+  "adapter_fix_commit": "1b3232d5f7d2563768ce927d9cbbcd39c1254305",
+  "setup": {
+    "isolated_storage": true,
+    "production_settings_changed": false,
+    "invalid_claude_key_max_retries": 0,
+    "http_server_codex_mode": "agent-full-access",
+    "positive_integration_quiet_timeout_seconds": 60
+  },
+  "summary": {
+    "passed": 63,
+    "partial": 3
+  },
+  "results": [
+    {
+      "agent": "claude",
+      "case": "ACP-01",
+      "status": "passed",
+      "seconds": 0.38,
+      "detail": "ACP v1 and background v1 negotiated",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.38,
+          "detail": "ACP v1 and background v1 negotiated"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-02",
+      "status": "passed",
+      "seconds": 0.41,
+      "detail": "Unnegotiated background RPC rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.41,
+          "detail": "Unnegotiated background RPC rejected"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-03",
+      "status": "passed",
+      "seconds": 0.36,
+      "detail": "Incomplete AIR cannot enable orchestrator drain",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.36,
+          "detail": "Incomplete AIR cannot enable orchestrator drain"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-04",
+      "status": "passed",
+      "seconds": 0.38,
+      "detail": "Malformed background requests rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.38,
+          "detail": "Malformed background requests rejected"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-05",
+      "status": "passed",
+      "seconds": 2.85,
+      "detail": "Documented Claude parser behavior: unknown field accepted",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.85,
+          "detail": "Documented Claude parser behavior: unknown field accepted"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-06",
+      "status": "passed",
+      "seconds": 2.65,
+      "detail": "Unknown and closed sessions rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.65,
+          "detail": "Unknown and closed sessions rejected"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-07",
+      "status": "passed",
+      "seconds": 0.72,
+      "detail": "Idle snapshot token stable",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.72,
+          "detail": "Idle snapshot token stable"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-08",
+      "status": "passed",
+      "seconds": 0.75,
+      "detail": "Missing and stale tokens cannot close",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.75,
+          "detail": "Missing and stale tokens cannot close"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-09",
+      "status": "passed",
+      "seconds": 0.74,
+      "detail": "Exactly one concurrent close accepted",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 0.74,
+          "detail": "Exactly one concurrent close accepted"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-10",
+      "status": "passed",
+      "seconds": 12.24,
+      "detail": "Prompt/close interleaving preserved session exclusion",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 12.24,
+          "detail": "Prompt/close interleaving preserved session exclusion"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-11",
+      "status": "passed",
+      "seconds": 20.15,
+      "detail": "Busy close refused; command completed",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 20.15,
+          "detail": "Busy close refused; command completed"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-12",
+      "status": "passed",
+      "seconds": 11.28,
+      "detail": "Native shell result independently verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 11.28,
+          "detail": "Native shell result independently verified"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-13",
+      "status": "passed",
+      "seconds": 32.1,
+      "detail": "Finite native task completed; stale close refused; result verified; processes absent",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 32.1,
+          "detail": "Finite native task completed; stale close refused; result verified; processes absent"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-14",
+      "status": "passed",
+      "seconds": 72.25,
+      "detail": "Four native generations completed and independently verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 72.25,
+          "detail": "Four native generations completed and independently verified"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-15",
+      "status": "passed",
+      "seconds": 29.96,
+      "detail": "Two parallel native tasks completed and verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 29.96,
+          "detail": "Two parallel native tasks completed and verified"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-16",
+      "status": "passed",
+      "seconds": 14.0,
+      "detail": "Exit 7 retained as failed and handled without mandatory retry",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 14.0,
+          "detail": "Exit 7 retained as failed and handled without mandatory retry"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-17",
+      "status": "passed",
+      "seconds": 6.52,
+      "detail": "Native stop confirmed; no late write",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 6.52,
+          "detail": "Native stop confirmed; no late write"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-18",
+      "status": "passed",
+      "seconds": 71.22,
+      "detail": "Native stop confirmed; no late write after 65 seconds",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 71.22,
+          "detail": "Native stop confirmed; no late write after 65 seconds"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-19",
+      "status": "passed",
+      "seconds": 5.5,
+      "detail": "Cancellation after actual command startup; no surviving process or output",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 5.5,
+          "detail": "Cancellation after actual command startup; no surviving process or output"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-20",
+      "status": "passed",
+      "seconds": 6.8,
+      "detail": "Loopback HTTP 200, busy close refusal, native stop and complete process cleanup",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 6.8,
+          "detail": "Loopback HTTP 200, busy close refusal, native stop and complete process cleanup"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-21",
+      "status": "passed",
+      "seconds": 19.91,
+      "detail": "Native child lifecycle and independent filesystem/process check passed",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 19.91,
+          "detail": "Native child lifecycle and independent filesystem/process check passed"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-22",
+      "status": "partial",
+      "seconds": 48.61,
+      "detail": "Native child lifecycle and independent filesystem/process check passed",
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 108.09,
+          "detail": "TimeoutError: Live assertion timed out"
+        },
+        {
+          "status": "failed",
+          "seconds": 104.07,
+          "detail": "TimeoutError: Live assertion timed out",
+          "snapshot": {
+            "version": 1,
+            "sessionId": "7fa7e3c3-1ad2-4d7b-8a96-1123e3ddf45f",
+            "pending": false,
+            "modelBusy": false,
+            "token": "[151,[{\"id\":\"bvtbvi405\",\"state\":\"stopped\",\"autonomous\":false}],[[\"a32e146fa95891ed6\",\"completed\"]]]",
+            "tasks": [
+              {
+                "id": "bvtbvi405",
+                "state": "stopped",
+                "autonomous": false
+              }
+            ],
+            "closed": false
+          }
+        },
+        {
+          "status": "passed",
+          "seconds": 48.61,
+          "detail": "Native child lifecycle and independent filesystem/process check passed"
+        }
+      ],
+      "latest_attempt_passed": true,
+      "limitation": "Finite native child work succeeded in the final run but was stopped by the SDK without a result in two earlier runs. Persistence is not guaranteed."
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-23",
+      "status": "passed",
+      "seconds": 83.38,
+      "detail": "Native child lifecycle and independent filesystem/process check passed",
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 23.11,
+          "detail": "AssertionError: "
+        },
+        {
+          "status": "failed",
+          "seconds": 21.83,
+          "detail": "AssertionError: []",
+          "snapshot": {
+            "version": 1,
+            "sessionId": "68810396-1770-444c-89f0-6c2f66f1efbe",
+            "pending": true,
+            "modelBusy": true,
+            "token": "[191,[{\"id\":\"b0madgt64\",\"state\":\"stopped\",\"autonomous\":false}],[[\"a9208dbe66550b3e9\",\"completed\"]]]",
+            "tasks": [
+              {
+                "id": "b0madgt64",
+                "state": "stopped",
+                "autonomous": false
+              }
+            ],
+            "closed": false
+          }
+        },
+        {
+          "status": "passed",
+          "seconds": 83.38,
+          "detail": "Native child lifecycle and independent filesystem/process check passed"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-24",
+      "status": "passed",
+      "seconds": 16.46,
+      "detail": "Persisted session loaded and existing file verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 16.46,
+          "detail": "Persisted session loaded and existing file verified"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-25",
+      "status": "passed",
+      "seconds": 5.58,
+      "detail": "Lost SDK cannot authorize successful close; residual processes cleaned independently",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 5.58,
+          "detail": "Lost SDK cannot authorize successful close; residual processes cleaned independently"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "ACP-26",
+      "status": "passed",
+      "seconds": 1.2,
+      "detail": "Authentication error delivered: Authentication required",
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 26.18,
+          "detail": "TimeoutError: ACP request timed out: nUseTool will not be invoked: permissionMode 'bypassPermissions' auto-approves every tool call (except explicit deny rules) before the callback is consulted. To gate every tool call, use a PreToolUse hook instead.\n(Use `node --trace-warnings ...` to show where the warning was created)\n[session/create] sessionId=8d95c4fa-8b5f-4f14-b0f1-e5158e3a19b3 phase=sdk-initialize durationMs=765 totalMs=798\n[authStatus] session account carries no identity signal; keeping probe\n[session/models] sessionId=8d95c4fa-8b5f-4f14-b0f1-e5158e3a19b3 phase=set-model durationMs=11 model=opus outcome=success\n[session/create] sessionId=8d95c4fa-8b5f-4f14-b0f1-e5158e3a19b3 phase=models durationMs=13 totalMs=811\n[session/create] sessionId=8d95c4fa-8b5f-4f14-b0f1-e5158e3a19b3 phase=modes durationMs=1 totalMs=812\n[session/create] sessionId=8d95c4fa-8b5f-4f14-b0f1-e5158e3a19b3 phase=agents durationMs=0 totalMs=812\n[session/create] sessionId=8d95c4fa-8b5f-4f14-b0f1-e5158e3a19b3 phase=register durationMs=2 totalMs=814\n"
+        },
+        {
+          "status": "passed",
+          "seconds": 1.82,
+          "detail": "Authentication error delivered: Authentication required"
+        },
+        {
+          "status": "passed",
+          "seconds": 1.2,
+          "detail": "Authentication error delivered: Authentication required"
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "INT-01",
+      "status": "passed",
+      "seconds": 108.57,
+      "detail": {
+        "result": "INTEGRATION_OK",
+        "waiting": true,
+        "seconds": 108.44
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 108.57,
+          "detail": {
+            "result": "INTEGRATION_OK",
+            "waiting": true,
+            "seconds": 108.44
+          }
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "INT-02",
+      "status": "passed",
+      "seconds": 136.82,
+      "detail": {
+        "result": "RECONCILED_OK",
+        "waiting": true,
+        "seconds": 136.7
+      },
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 128.66,
+          "detail": "AssertionError: {'expected': 'RECONCILED_OK', 'actual': 'RECONCILED_OK\\n'}"
+        },
+        {
+          "status": "passed",
+          "seconds": 136.82,
+          "detail": {
+            "result": "RECONCILED_OK",
+            "waiting": true,
+            "seconds": 136.7
+          }
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "INT-03",
+      "status": "passed",
+      "seconds": 118.52,
+      "detail": {
+        "result": "REPEAT_OK",
+        "waiting": true,
+        "seconds": 118.36
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 118.52,
+          "detail": {
+            "result": "REPEAT_OK",
+            "waiting": true,
+            "seconds": 118.36
+          }
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "INT-04",
+      "status": "passed",
+      "seconds": 25.79,
+      "detail": {
+        "error": "Remote agent timed out.\nRemote stop unconfirmed; retry blocked pending verification.",
+        "uncertain": true,
+        "residual_processes": 0,
+        "waiting": true,
+        "seconds": 25.63
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 25.79,
+          "detail": {
+            "error": "Remote agent timed out.\nRemote stop unconfirmed; retry blocked pending verification.",
+            "uncertain": true,
+            "residual_processes": 0,
+            "waiting": true,
+            "seconds": 25.63
+          }
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "INT-05",
+      "status": "partial",
+      "seconds": 12.2,
+      "detail": {
+        "error": "session/prompt: ValueError: \nRemote stop unconfirmed; retry blocked pending verification.",
+        "uncertain": true,
+        "residual_processes": 1,
+        "waiting": true,
+        "seconds": 11.87
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 12.2,
+          "detail": {
+            "error": "session/prompt: ValueError: \nRemote stop unconfirmed; retry blocked pending verification.",
+            "uncertain": true,
+            "residual_processes": 1,
+            "waiting": true,
+            "seconds": 11.87
+          }
+        }
+      ],
+      "protective_criterion_passed": true
+    },
+    {
+      "agent": "claude",
+      "case": "INT-06",
+      "status": "passed",
+      "seconds": 17.26,
+      "detail": {
+        "result": "DISABLED_OK",
+        "waiting": false,
+        "seconds": 17.12
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 17.26,
+          "detail": {
+            "result": "DISABLED_OK",
+            "waiting": false,
+            "seconds": 17.12
+          }
+        }
+      ]
+    },
+    {
+      "agent": "claude",
+      "case": "INT-07",
+      "status": "passed",
+      "seconds": 4.65,
+      "detail": {
+        "error": "session/prompt: Authentication required",
+        "uncertain": false,
+        "residual_processes": 0,
+        "waiting": true,
+        "seconds": 2.6,
+        "disabled_wait": {
+          "error": "session/prompt: Authentication required",
+          "uncertain": false,
+          "residual_processes": 0,
+          "waiting": false,
+          "seconds": 1.9
+        }
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 51.51,
+          "detail": {
+            "error": "Remote agent timed out.\nRemote stop unconfirmed; retry blocked pending verification.",
+            "uncertain": true,
+            "residual_processes": 0,
+            "waiting": true,
+            "seconds": 25.72,
+            "disabled_wait": {
+              "error": "Remote agent timed out.",
+              "uncertain": false,
+              "residual_processes": 0,
+              "waiting": false,
+              "seconds": 25.62
+            }
+          }
+        },
+        {
+          "status": "passed",
+          "seconds": 4.65,
+          "detail": {
+            "error": "session/prompt: Authentication required",
+            "uncertain": false,
+            "residual_processes": 0,
+            "waiting": true,
+            "seconds": 2.6,
+            "disabled_wait": {
+              "error": "session/prompt: Authentication required",
+              "uncertain": false,
+              "residual_processes": 0,
+              "waiting": false,
+              "seconds": 1.9
+            }
+          }
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-01",
+      "status": "passed",
+      "seconds": 2.54,
+      "detail": "ACP v1 and background v1 negotiated",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.54,
+          "detail": "ACP v1 and background v1 negotiated"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-02",
+      "status": "passed",
+      "seconds": 2.34,
+      "detail": "Unnegotiated background RPC rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.34,
+          "detail": "Unnegotiated background RPC rejected"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-03",
+      "status": "passed",
+      "seconds": 2.31,
+      "detail": "Incomplete AIR cannot enable orchestrator drain",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.31,
+          "detail": "Incomplete AIR cannot enable orchestrator drain"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-04",
+      "status": "passed",
+      "seconds": 2.33,
+      "detail": "Malformed background requests rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.33,
+          "detail": "Malformed background requests rejected"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-05",
+      "status": "passed",
+      "seconds": 2.65,
+      "detail": "Unknown field rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 2.65,
+          "detail": "Unknown field rejected"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-06",
+      "status": "passed",
+      "seconds": 5.46,
+      "detail": "Unknown and closed sessions rejected",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 5.46,
+          "detail": "Unknown and closed sessions rejected"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-07",
+      "status": "passed",
+      "seconds": 3.58,
+      "detail": "Idle snapshot token stable",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 3.58,
+          "detail": "Idle snapshot token stable"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-08",
+      "status": "passed",
+      "seconds": 4.44,
+      "detail": "Missing and stale tokens cannot close",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 4.44,
+          "detail": "Missing and stale tokens cannot close"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-09",
+      "status": "passed",
+      "seconds": 3.59,
+      "detail": "Exactly one concurrent close accepted",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 3.59,
+          "detail": "Exactly one concurrent close accepted"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-10",
+      "status": "passed",
+      "seconds": 17.34,
+      "detail": "Prompt/close interleaving preserved session exclusion",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 17.34,
+          "detail": "Prompt/close interleaving preserved session exclusion"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-11",
+      "status": "passed",
+      "seconds": 17.56,
+      "detail": "Busy close refused; command completed",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 17.56,
+          "detail": "Busy close refused; command completed"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-12",
+      "status": "passed",
+      "seconds": 10.99,
+      "detail": "Native shell result independently verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 10.99,
+          "detail": "Native shell result independently verified"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-13",
+      "status": "passed",
+      "seconds": 26.44,
+      "detail": "Finite native task completed; stale close refused; result verified; processes absent",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 26.44,
+          "detail": "Finite native task completed; stale close refused; result verified; processes absent"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-14",
+      "status": "passed",
+      "seconds": 39.99,
+      "detail": "Four native generations completed and independently verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 39.99,
+          "detail": "Four native generations completed and independently verified"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-15",
+      "status": "passed",
+      "seconds": 26.93,
+      "detail": "Two parallel native tasks completed and verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 26.93,
+          "detail": "Two parallel native tasks completed and verified"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-16",
+      "status": "passed",
+      "seconds": 19.4,
+      "detail": "Exit 7 retained as failed and handled without mandatory retry",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 19.4,
+          "detail": "Exit 7 retained as failed and handled without mandatory retry"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-17",
+      "status": "passed",
+      "seconds": 11.4,
+      "detail": "Native stop confirmed; no late write",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 11.4,
+          "detail": "Native stop confirmed; no late write"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-18",
+      "status": "passed",
+      "seconds": 75.16,
+      "detail": "Native stop confirmed; no late write after 65 seconds",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 75.16,
+          "detail": "Native stop confirmed; no late write after 65 seconds"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-19",
+      "status": "passed",
+      "seconds": 5.75,
+      "detail": "Cancellation after actual command startup; no surviving process or output",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 5.75,
+          "detail": "Cancellation after actual command startup; no surviving process or output"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-20",
+      "status": "passed",
+      "seconds": 17.66,
+      "detail": "Loopback HTTP 200, busy close refusal, native stop and complete process cleanup",
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 9.22,
+          "detail": "RpcError: Internal error"
+        },
+        {
+          "status": "passed",
+          "seconds": 17.66,
+          "detail": "Loopback HTTP 200, busy close refusal, native stop and complete process cleanup"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-21",
+      "status": "passed",
+      "seconds": 12.04,
+      "detail": "Native child lifecycle and independent filesystem/process check passed",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 12.04,
+          "detail": "Native child lifecycle and independent filesystem/process check passed"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-22",
+      "status": "passed",
+      "seconds": 31.45,
+      "detail": "Native child lifecycle and independent filesystem/process check passed",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 31.45,
+          "detail": "Native child lifecycle and independent filesystem/process check passed"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-23",
+      "status": "passed",
+      "seconds": 89.2,
+      "detail": "Native child lifecycle and independent filesystem/process check passed",
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 13.75,
+          "detail": "AssertionError: "
+        },
+        {
+          "status": "passed",
+          "seconds": 89.2,
+          "detail": "Native child lifecycle and independent filesystem/process check passed"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-24",
+      "status": "passed",
+      "seconds": 17.55,
+      "detail": "Persisted session loaded and existing file verified",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 17.55,
+          "detail": "Persisted session loaded and existing file verified"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-25",
+      "status": "passed",
+      "seconds": 9.3,
+      "detail": "Lost SDK cannot authorize successful close; residual processes cleaned independently",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 9.3,
+          "detail": "Lost SDK cannot authorize successful close; residual processes cleaned independently"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "ACP-26",
+      "status": "passed",
+      "seconds": 3.19,
+      "detail": "Authentication error delivered: Authentication required",
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 3.19,
+          "detail": "Authentication error delivered: Authentication required"
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "INT-01",
+      "status": "passed",
+      "seconds": 93.14,
+      "detail": {
+        "result": "INTEGRATION_OK",
+        "waiting": true,
+        "seconds": 93.01
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 93.14,
+          "detail": {
+            "result": "INTEGRATION_OK",
+            "waiting": true,
+            "seconds": 93.01
+          }
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "INT-02",
+      "status": "passed",
+      "seconds": 112.31,
+      "detail": {
+        "result": "RECONCILED_OK",
+        "waiting": true,
+        "seconds": 112.13
+      },
+      "attempts": [
+        {
+          "status": "failed",
+          "seconds": 105.89,
+          "detail": "AssertionError: {'expected': 'RECONCILED_OK', 'actual': None}"
+        },
+        {
+          "status": "passed",
+          "seconds": 112.31,
+          "detail": {
+            "result": "RECONCILED_OK",
+            "waiting": true,
+            "seconds": 112.13
+          }
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "INT-03",
+      "status": "passed",
+      "seconds": 105.74,
+      "detail": {
+        "result": "REPEAT_OK",
+        "waiting": true,
+        "seconds": 105.59
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 105.74,
+          "detail": {
+            "result": "REPEAT_OK",
+            "waiting": true,
+            "seconds": 105.59
+          }
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "INT-04",
+      "status": "passed",
+      "seconds": 27.58,
+      "detail": {
+        "error": "Remote agent timed out.\nRemote stop unconfirmed; retry blocked pending verification.",
+        "uncertain": true,
+        "residual_processes": 0,
+        "waiting": true,
+        "seconds": 27.43
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 25.9,
+          "detail": {
+            "error": "Remote agent timed out.\nRemote stop unconfirmed; retry blocked pending verification.",
+            "uncertain": true,
+            "residual_processes": 3,
+            "waiting": true,
+            "seconds": 25.69
+          }
+        },
+        {
+          "status": "passed",
+          "seconds": 27.58,
+          "detail": {
+            "error": "Remote agent timed out.\nRemote stop unconfirmed; retry blocked pending verification.",
+            "uncertain": true,
+            "residual_processes": 0,
+            "waiting": true,
+            "seconds": 27.43
+          }
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "INT-05",
+      "status": "partial",
+      "seconds": 10.86,
+      "detail": {
+        "error": "session/prompt: ValueError: \nRemote stop unconfirmed; retry blocked pending verification.",
+        "uncertain": true,
+        "residual_processes": 10,
+        "waiting": true,
+        "seconds": 8.86
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 10.86,
+          "detail": {
+            "error": "session/prompt: ValueError: \nRemote stop unconfirmed; retry blocked pending verification.",
+            "uncertain": true,
+            "residual_processes": 10,
+            "waiting": true,
+            "seconds": 8.86
+          }
+        }
+      ],
+      "protective_criterion_passed": true
+    },
+    {
+      "agent": "codex",
+      "case": "INT-06",
+      "status": "passed",
+      "seconds": 9.9,
+      "detail": {
+        "result": "DISABLED_OK",
+        "waiting": false,
+        "seconds": 9.75
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 9.9,
+          "detail": {
+            "result": "DISABLED_OK",
+            "waiting": false,
+            "seconds": 9.75
+          }
+        }
+      ]
+    },
+    {
+      "agent": "codex",
+      "case": "INT-07",
+      "status": "passed",
+      "seconds": 4.65,
+      "detail": {
+        "error": "session/prompt: Authentication required",
+        "uncertain": false,
+        "residual_processes": 0,
+        "waiting": true,
+        "seconds": 2.46,
+        "disabled_wait": {
+          "error": "session/prompt: Authentication required",
+          "uncertain": false,
+          "residual_processes": 0,
+          "waiting": false,
+          "seconds": 2.04
+        }
+      },
+      "attempts": [
+        {
+          "status": "passed",
+          "seconds": 4.65,
+          "detail": {
+            "error": "session/prompt: Authentication required",
+            "uncertain": false,
+            "residual_processes": 0,
+            "waiting": true,
+            "seconds": 2.46,
+            "disabled_wait": {
+              "error": "session/prompt: Authentication required",
+              "uncertain": false,
+              "residual_processes": 0,
+              "waiting": false,
+              "seconds": 2.04
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "remote_owned_live_processes": 0,
+    "remote_provider_key_files": 0,
+    "local_temporary_directory_removed": true,
+    "isolated_fixed_runtime_removed": true,
+    "provider_key_in_commit": false
+  },
+  "tested_adapter_bundle_sha256": "c614c7713273b5acef85890e0836193cfbfd66aacf8c90810cf25c90ed698843"
+}

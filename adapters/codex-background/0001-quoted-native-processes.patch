@@ -1,0 +1,201 @@
+From 1b3232d5f7d2563768ce927d9cbbcd39c1254305 Mon Sep 17 00:00:00 2001
+From: dev <dev.temp.null.mail@gmail.com>
+Date: Tue, 3 Nov 2026 16:31:03 +0000
+Subject: [PATCH] fix: resolve quoted native processes and repair Codex event
+ client
+
+---
+ .../run-codex/scripts/run-codex-test.ts       | 23 +++++++----
+ codex/src/NativeWorkloads.ts                  | 39 ++++++++++++++++++-
+ codex/src/__tests__/NativeWorkloads.test.ts   | 24 ++++++++++++
+ docs/codex.md                                 |  9 +++++
+ 4 files changed, 87 insertions(+), 8 deletions(-)
+
+diff --git a/codex/.claude/skills/run-codex/scripts/run-codex-test.ts b/codex/.claude/skills/run-codex/scripts/run-codex-test.ts
+index d74b28c..f478fd3 100644
+--- a/codex/.claude/skills/run-codex/scripts/run-codex-test.ts
++++ b/codex/.claude/skills/run-codex/scripts/run-codex-test.ts
+@@ -108,7 +108,7 @@ async function main() {
+             if (json) {
+                 console.log(JSON.stringify(event));
+             } else {
+-                console.log(`[CODEX] ${event.type}:`, JSON.stringify(event.data, null, 2));
++                console.log(`[CODEX] ${event.eventType}:`, JSON.stringify(event, null, 2));
+             }
+         }
+     });
+@@ -131,21 +131,23 @@ async function main() {
+         return originalSessionUpdate?.call(acpConnection, params);
+     };
+ 
++    let sessionId: string | undefined;
+     try {
+         // Initialize
+         console.log("\n--- Initializing ---\n");
+         await codexAcpAgent.initialize({ protocolVersion: 1 });
+ 
+         // Check auth
+-        const authRequired = await codexAcpClient.authRequired();
++        const {required: authRequired} = await codexAcpClient.readAuthRequirement();
+         if (authRequired) {
+             console.error("Error: Authentication required. Please login to Codex first.");
+-            process.exit(1);
++            throw new Error("Authentication required");
+         }
+ 
+         // Create session
+         console.log("\n--- Creating Session ---\n");
+         const sessionResponse = await codexAcpAgent.newSession({ cwd, mcpServers: [] });
++        sessionId = sessionResponse.sessionId;
+         console.log(`Session ID: ${sessionResponse.sessionId}`);
+         console.log(`Model: ${sessionResponse.models?.currentModelId}`);
+ 
+@@ -181,7 +183,7 @@ async function main() {
+             // Event type breakdown
+             const eventTypes = new Map<string, number>();
+             for (const event of codexEvents) {
+-                const key = `${event.type}:${(event.data as any)?.method || "unknown"}`;
++                const key = event.eventType + ("method" in event ? `:${event.method}` : "");
+                 eventTypes.set(key, (eventTypes.get(key) || 0) + 1);
+             }
+             console.log(`\nEvent Types:`);
+@@ -198,10 +200,17 @@ async function main() {
+ 
+     } catch (err) {
+         console.error("Error:", err);
+-        process.exit(1);
++        process.exitCode = 1;
+     } finally {
+-        codexConnection.connection.end();
+-        codexConnection.process.kill();
++        try {
++            if (sessionId) {
++                await codexAcpAgent.closeSession({sessionId});
++            }
++        } finally {
++            codexAcpAgent.sessionIndex.dispose();
++            codexConnection.connection.end();
++            codexConnection.process.kill();
++        }
+     }
+ }
+ 
+diff --git a/codex/src/NativeWorkloads.ts b/codex/src/NativeWorkloads.ts
+index ff5337a..e2acd11 100644
+--- a/codex/src/NativeWorkloads.ts
++++ b/codex/src/NativeWorkloads.ts
+@@ -10,6 +10,43 @@ type Identity = {pid: number; parent: number; start: string; state: string; scop
+ type Config = {[key: string]: JsonValue | undefined};
+ const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+ 
++/** Read literal shell words without evaluating substitutions, expansions or operators. */
++function literalArguments(command: string): string[] | null {
++    const words: string[] = [];
++    let word = "";
++    let started = false;
++    let quote: "'" | '"' | null = null;
++    for (let index = 0; index < command.length; index++) {
++        const char = command[index]!;
++        if (quote === "'") {
++            if (char === "'") quote = null;
++            else word += char;
++        } else if (char === "\\") {
++            const next = command[++index];
++            if (next === undefined) return null;
++            if (next === "\n") continue;
++            word += quote === '"' && !['"', "\\", "$", "`"].includes(next) ? "\\" + next : next;
++            started = true;
++        } else if (quote === '"') {
++            if (char === '"') quote = null;
++            else if (char === "$" || char === "`") return null;
++            else word += char;
++        } else if (char === "'" || char === '"') {
++            quote = char;
++            started = true;
++        } else if (char === " " || char === "\t") {
++            if (started) {words.push(word); word = ""; started = false;}
++        } else {
++            if (/[;&|<>$()`\n*?\[\]{}~#]/.test(char)) return null;
++            word += char;
++            started = true;
++        }
++    }
++    if (quote !== null) return null;
++    if (started) words.push(word);
++    return words.length > 0 ? words : null;
++}
++
+ /** Tracks native shell work across setsid/reparenting without signalling unrelated process groups. */
+ export class NativeWorkloads {
+     enabled = false;
+@@ -104,7 +141,7 @@ export class NativeWorkloads {
+         const scope = this.scopes.get(sessionId);
+         if (!scope) throw new Error("Native workload ownership was not initialized");
+         const matches: number[] = [];
+-        const simple = !/[;&|<>$()\'"\\\n]/.test(command) ? command.trim().split(/\s+/) : null;
++        const simple = literalArguments(command);
+         for (const item of await this.processes()) {
+             if (item.scope !== scope || this.infrastructure(item)) continue;
+             try {
+diff --git a/codex/src/__tests__/NativeWorkloads.test.ts b/codex/src/__tests__/NativeWorkloads.test.ts
+index b7cb0cb..d70313c 100644
+--- a/codex/src/__tests__/NativeWorkloads.test.ts
++++ b/codex/src/__tests__/NativeWorkloads.test.ts
+@@ -120,6 +120,30 @@ describe.skipIf(process.platform !== "linux")("Native workload ownership", () =>
+         await workloads.stopSession("thread-1");
+     });
+ 
++    it.each(["single", "double"])("resolves a %s-quoted exec-optimized program and stops only that task", async quoting => {
++        const {workloads, token} = await scope();
++        const owned = await child(token); const unrelated = await child("unrelated");
++        const code = "console.log('ready');setInterval(()=>{},1000)";
++        const argument = quoting === "single" ? "'" + code.replaceAll("'", "'\\''") + "'" : JSON.stringify(code);
++        const command = process.execPath + " -e " + argument;
++        const pid = await workloads.resolvePid("thread-1", command);
++        expect(pid).toBe(owned.pid);
++        await workloads.capture("thread-1", "quoted", pid);
++        expect(await workloads.stopTask("thread-1", "quoted", pid)).toBe(true);
++        expect(await workloads.snapshot("thread-1")).toEqual([]);
++        expect(() => process.kill(unrelated.pid!, 0)).not.toThrow();
++    });
++
++    it("refuses ambiguous quoted commands and never evaluates shell substitutions", async () => {
++        const {workloads, token} = await scope();
++        await child(token); await child(token);
++        const code = JSON.stringify("console.log('ready');setInterval(()=>{},1000)");
++        await expect(workloads.resolvePid("thread-1", process.execPath + " -e " + code)).rejects.toThrow("Ambiguous");
++        expect(await workloads.resolvePid("thread-1", "$(printf " + process.execPath + ") -e " + code)).toBeNull();
++        expect(await workloads.resolvePid("thread-1", process.execPath + " -e " + code + " | cat")).toBeNull();
++        await workloads.stopSession("thread-1");
++    });
++
+     it("prevents a waiting shell from executing its trailing command during stop", async () => {
+         const {workloads, token} = await scope();
+         const directory = directories[0]!;
+diff --git a/docs/codex.md b/docs/codex.md
+index 0a1b8a2..93b78c5 100644
+--- a/docs/codex.md
++++ b/docs/codex.md
+@@ -52,6 +52,11 @@ identity includes session ID, task ID, PID and process start time. If the native
+ API omits an OS PID, only a unique, marked, exact command match is accepted.
+ Missing or ambiguous ownership cannot produce a successful stop.
+ 
++Literal shell quoting and escaping are parsed when matching an exec-optimized
++program's argv. This includes `python3 -c '...; ...'` after the shell has exited.
++Substitutions, pipelines and expansions are never evaluated or treated as
++literal argv. Multiple matching processes still fail closed.
++
+ Before explicit stop/cancel, the supervisor freezes the verified process tree
+ and kills it, then verifies absence and reconciles the native API. Freezing is
+ necessary: killing `sleep` first can wake Bash and execute its trailing command.
+@@ -92,3 +97,7 @@ npm run build
+ The full suite includes real Linux child processes, detached descendants,
+ ownership ambiguity, duplicate terminal IDs in separate sessions, snapshot races,
+ failed tasks, recovery failure and post-stop delayed-write regressions.
++
++The `run-codex` event client uses `readAuthRequirement()` and `eventType` from
++the current adapter API. It closes its session before stopping the app-server,
++and releases the connection on authentication and session-close errors too.
+-- 
+2.43.0
+
