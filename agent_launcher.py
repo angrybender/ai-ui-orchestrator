@@ -19,13 +19,9 @@ def launch(*, after_wait: str | None = None) -> int | None:
     with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
         if after_wait is not None:
-            # Continue only the WAIT transition owned by the finished run.
-            # The new executor still chooses/reserves its task in claim().
-            waiting = connection.execute(
-                "SELECT 1 FROM agent_runs r JOIN board_tasks t ON t.id = r.task_pk "
-                "WHERE r.id = ? AND r.state = 'FAILED' AND t.status = 'WAIT' AND t.active_run_id = r.id",
-                (after_wait,),
-            ).fetchone()
+            # This check avoids pointless processes; claim() repeats the fence
+            # atomically after startup, when another worker may have run already.
+            waiting = agent_store.wait_continuation_ready(connection, after_wait)
             blocked = connection.execute('SELECT 1 FROM agent_runs WHERE agent_uncertain = 1').fetchone()
             available = connection.execute(
                 "SELECT 1 FROM board_tasks WHERE status = 'OPEN' AND init_uncertain = 0 AND agent_uncertain = 0 LIMIT 1"
@@ -42,12 +38,15 @@ def launch(*, after_wait: str | None = None) -> int | None:
                 return None
             if identity == active['process_token'] and time.time() - (active['started_at'] or active['created_at']) <= active['timeout']:
                 return None
+        command = [sys.executable, str(Path(__file__).with_name('agent_worker.py')),
+                   '--continue-after-wait',
+                   '--database', str(board_store.DATABASE_PATH.resolve()),
+                   '--files', str(board_store.FILES_DIR.resolve())]
+        if after_wait is not None:
+            command.extend(['--after-wait', after_wait])
         try:
             process = subprocess.Popen(
-                [sys.executable, str(Path(__file__).with_name('agent_worker.py')),
-                 '--continue-after-wait',
-                 '--database', str(board_store.DATABASE_PATH.resolve()),
-                 '--files', str(board_store.FILES_DIR.resolve())],
+                command,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 close_fds=True, **process_options(),
             )

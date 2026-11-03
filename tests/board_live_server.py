@@ -30,8 +30,8 @@ def main() -> None:
     parser.add_argument("--run-id")
     args = parser.parse_args()
     if args.wait_queue:
-        from wait_queue_worker import configure_launcher
-        configure_launcher()
+        from wait_queue_worker import configure_launcher, stop_test_workers
+        processes = configure_launcher()
     if args.operation:
         # Only accept an existing database owned by this fixture, never /app/data.
         directory = args.directory.resolve()
@@ -86,7 +86,11 @@ def main() -> None:
                 server.should_exit = True
 
             threading.Thread(target=stop_on_stdin, daemon=True).start()
-            server.run(sockets=[listener])
+            try:
+                server.run(sockets=[listener])
+            finally:
+                if args.wait_queue:
+                    stop_test_workers(processes)
 
 
 if __name__ == "__main__":

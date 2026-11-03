@@ -30,7 +30,7 @@ CONFIG_KEYS = (
 logger = logging.getLogger(__name__)
 
 
-def execute(*, continue_after_wait: bool = False) -> int:
+def execute(*, continue_after_wait: bool = False, after_wait: str | None = None) -> int:
     # Hold the configuration lock through the atomic claim: Save cannot split
     # this execution's snapshot or race its reservation.
     with configuration_lock(settings_store.USER_SETTINGS_DIR):
@@ -44,9 +44,10 @@ def execute(*, continue_after_wait: bool = False) -> int:
         except Exception:
             timeout = 7200
             config_error = True
-        run = agent_store.claim(timeout)
+        run = agent_store.claim(timeout, after_wait=after_wait)
     if run is None:
         return 0
+    exit_code = 1
     try:
         if config_error:
             raise RemoteAgentError('Invalid agent configuration.')
@@ -68,36 +69,36 @@ def execute(*, continue_after_wait: bool = False) -> int:
         stop_reason = result.get('stopReason')
         if stop_reason != 'end_turn':
             agent_store.finish(run['id'], f'Remote agent stopped: {stop_reason}.', stop_reason)
-            return 1
-        agent_store.finish(run['id'], stop_reason=stop_reason)
-        return 0
+        else:
+            agent_store.finish(run['id'], stop_reason=stop_reason)
+            exit_code = 0
     except InitError as error:
         agent_store.finish(run['id'], str(error), init_error=True, uncertain=error.uncertain)
-        return 1
     except RemoteAgentError as error:
         agent_store.finish(run['id'], str(error), getattr(error, 'stop_reason', None),
                            agent_uncertain=error.uncertain)
-        return 1
     except BaseException as error:
         # Stopping the supervisor must not leave a detached successor behind.
         if not isinstance(error, Exception):
             continue_after_wait = False
         agent_store.finish(run['id'], 'Agent executor failed.')
-        return 1
-    finally:
-        if continue_after_wait:
-            try:
-                agent_launcher.launch(after_wait=run['id'])
-            except (RuntimeError, OSError, sqlite3.Error):
-                # Preserve the finished run and its original error. The regular
-                # consumer can retry starting the next OPEN task later.
-                logger.error('Unable to continue the OPEN queue after WAIT.')
+    # Run this only after all error handling completed. A signal or persistence
+    # failure in an except handler must not start another task on its way out.
+    if continue_after_wait:
+        try:
+            agent_launcher.launch(after_wait=run['id'])
+        except (RuntimeError, OSError, sqlite3.Error):
+            # Preserve the finished run and its original error. The regular
+            # consumer can retry starting the next OPEN task later.
+            logger.error('Unable to continue the OPEN queue after WAIT.')
+    return exit_code
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='Execute the first OPEN Board task.')
     parser.add_argument('--continue-after-wait', action='store_true',
                         help='Start a new executor for the next OPEN task after WAIT.')
+    parser.add_argument('--after-wait', help='Continue only if this failed run has not been followed by another claim.')
     parser.add_argument('--database', type=Path, default=board_store.DATABASE_PATH)
     parser.add_argument('--files', type=Path, default=board_store.FILES_DIR)
     args = parser.parse_args()
@@ -112,7 +113,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, terminate)
     if os.name == 'nt':
         signal.signal(signal.SIGBREAK, terminate)
-    return execute(continue_after_wait=args.continue_after_wait)
+    return execute(continue_after_wait=args.continue_after_wait, after_wait=args.after_wait)
 
 
 if __name__ == '__main__':

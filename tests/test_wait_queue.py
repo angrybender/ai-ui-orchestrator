@@ -1,8 +1,12 @@
 """Real-process WAIT continuation with isolated SQLite and local transport."""
 from contextlib import closing
 import importlib.util
+import os
 from pathlib import Path
+import sys
+import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,21 +25,14 @@ def queue(monkeypatch):
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     original = agent_launcher.subprocess.Popen
-    fixture.configure_launcher()
+    processes = fixture.configure_launcher()
     patched = agent_launcher.subprocess.Popen
     agent_launcher.subprocess.Popen = original
     monkeypatch.setattr(agent_launcher.subprocess, 'Popen', patched)
-    yield
-    # No worker can outlive its test, including assertion failures.
-    with closing(board_store.connect()) as db:
-        pids = {row[0] for row in db.execute(f'SELECT pid FROM agent_runs WHERE {agent_store.ACTIVE}')}
-    for pid in pids:
-        import os
-        import signal
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+    try:
+        yield fixture, processes
+    finally:
+        fixture.stop_test_workers(processes)
 
 
 def seed(modes):
@@ -152,3 +149,106 @@ def test_consumer_claiming_next_task_prevents_duplicate_executor(queue, monkeypa
         assert agent_store.active_run()['id'] == successor['id']
     finally:
         agent_store.finish(successor['id'])
+
+
+@pytest.mark.parametrize('failure', [agent_worker.RemoteAgentError, agent_worker.InitError])
+@pytest.mark.parametrize('interruption', [KeyboardInterrupt, SystemExit, sqlite3.OperationalError])
+def test_stop_during_failure_persistence_cannot_start_successor(queue, monkeypatch, failure, interruption):
+    seed(('success', 'failure', 'success'))
+    original_finish = agent_store.finish
+    launches = []
+
+    def fail_transport(*args, **kwargs):
+        raise failure('Original error')
+
+    def interrupted_finish(*args, **kwargs):
+        original_finish(*args, **kwargs)
+        # A signal can arrive just after SQLite committed WAIT, including in
+        # an except handler which the worker's sibling handlers cannot catch.
+        raise interruption()
+
+    monkeypatch.setattr(agent_worker, 'run_remote', fail_transport)
+    monkeypatch.setattr(agent_store, 'finish', interrupted_finish)
+    monkeypatch.setattr(agent_launcher, 'launch', lambda **kwargs: launches.append(kwargs))
+    with pytest.raises(interruption):
+        agent_worker.execute(continue_after_wait=True)
+    assert board_store.get_task('Q-9')['status'] == 'WAIT'
+    assert launches == []
+
+
+@pytest.mark.parametrize('outcome', [None, 'Consumer failed'])
+def test_delayed_successor_does_not_skip_past_consumer_run(queue, monkeypatch, outcome):
+    seed(('success', 'failure', 'success'))
+    predecessor = agent_store.claim(60)
+    agent_store.finish(predecessor['id'], 'Original error')
+    dispatched = []
+
+    def delayed_popen(command, **kwargs):
+        dispatched.append(command)
+        return SimpleNamespace(pid=12345, wait=lambda: 0)
+
+    monkeypatch.setattr(agent_launcher.subprocess, 'Popen', delayed_popen)
+    assert agent_launcher.launch(after_wait=predecessor['id']) == 12345
+    consumer_run = agent_store.claim(60)
+    assert consumer_run['task_id'] == 'Q-1'
+    agent_store.finish(consumer_run['id'], outcome)
+    # Complete the competing run before the dispatched child has even claimed
+    # a task. PREPARING/RUNNING uniqueness alone cannot fence this race.
+    transports = []
+    monkeypatch.setattr(agent_worker, 'run_remote', lambda task, *a, **k: transports.append(task['task_id']) or {'stopReason': 'end_turn'})
+    monkeypatch.setattr(agent_worker.signal, 'signal', lambda *args: None)
+    monkeypatch.setattr(sys, 'argv', dispatched[0][1:])
+    assert agent_worker.main() == 0
+    assert transports == []
+    assert board_store.get_task('Q-10')['status'] == 'OPEN'
+    with closing(board_store.connect()) as db:
+        assert db.execute('SELECT COUNT(*) FROM agent_runs').fetchone()[0] == 2
+
+
+def test_continuation_uses_claim_order_when_clock_moves_backwards(queue, monkeypatch):
+    seed(('success', 'failure', 'success'))
+    first = agent_store.claim(60)
+    agent_store.finish(first['id'], 'First error')
+    second = agent_store.claim(60)
+    agent_store.finish(second['id'], 'Second error')
+    with closing(board_store.connect()) as db, db:
+        db.execute('UPDATE agent_runs SET created_at = 0 WHERE id = ?', (second['id'],))
+    assert agent_store.claim(60, after_wait=first['id']) is None
+    continuation = agent_store.claim(60, after_wait=second['id'])
+    assert continuation['task_id'] == 'Q-10'
+    agent_store.finish(continuation['id'])
+
+
+def test_teardown_never_signals_pytest_or_unverified_pid(queue, monkeypatch):
+    fixture, _ = queue
+    seed(('success', 'failure', 'success'))
+    run = agent_store.claim(60)
+    original_scope = agent_store.executor_scope()
+
+    def unexpected_signal(*args, **kwargs):
+        pytest.fail('Fixture tried to signal an unowned process')
+
+    monkeypatch.setattr(fixture.os, 'kill', unexpected_signal)
+    monkeypatch.setattr(fixture, 'stop_process', unexpected_signal)
+    fixture.stop_test_workers([])  # A claim in this interpreter belongs to pytest.
+    with closing(board_store.connect()) as db, db:
+        db.execute("UPDATE agent_runs SET pid = 12345, executor_scope = 'foreign' WHERE id = ?", (run['id'],))
+    fixture.stop_test_workers([])
+    with closing(board_store.connect()) as db, db:
+        db.execute('UPDATE agent_runs SET executor_scope = ? WHERE id = ?', (original_scope, run['id']))
+    monkeypatch.setattr(agent_store, 'process_identity', lambda _: 'reused-pid-token')
+    fixture.stop_test_workers([])
+    agent_store.finish(run['id'], 'Test cleanup')
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX SIGTERM delivery; Windows interruption is tested separately')
+def test_real_sigterm_after_wait_commit_does_not_start_next_task(queue):
+    _, processes = queue
+    seed(('success', 'sigterm-at-finish', 'success'))
+    assert agent_launcher.launch()
+    assert processes[0].wait(timeout=15) == 1
+    assert board_store.get_task('Q-9')['status'] == 'WAIT'
+    assert board_store.get_task('Q-1')['status'] == 'OPEN'
+    assert board_store.get_task('Q-10')['status'] == 'OPEN'
+    with closing(board_store.connect()) as db:
+        assert db.execute('SELECT COUNT(*) FROM agent_runs').fetchone()[0] == 1
