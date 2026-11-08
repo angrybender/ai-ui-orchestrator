@@ -35,6 +35,7 @@ directory: [specs](specs)
 - Archive page: [archive.md](specs/archive.md)
 - Settings page: [settings.md](specs/settings.md)
 - Task execution and initialization: [agent.md](specs/agent.md)
+- Developing logs: [developer-log.md](specs/developer-log.md)
 
 IGNORE DIR:
 - dev

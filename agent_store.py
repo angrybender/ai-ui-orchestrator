@@ -222,7 +222,21 @@ def recover() -> None:
         return
 
 
-def claim(timeout: float) -> dict | None:
+def wait_continuation_ready(connection, run_id: str) -> bool:
+    """Fence a continuation against every claim since its failed predecessor.
+
+    Callers hold a write transaction; claim() rechecks before inserting a run.
+    SQLite rowid gives insertion order even when wall-clock time moves backwards.
+    """
+    return connection.execute(
+        "SELECT 1 FROM agent_runs r JOIN board_tasks t ON t.id = r.task_pk "
+        "WHERE r.id = ? AND r.state = 'FAILED' AND t.status = 'WAIT' AND t.active_run_id = r.id "
+        "AND r.id = (SELECT id FROM agent_runs ORDER BY rowid DESC LIMIT 1)",
+        (run_id,),
+    ).fetchone() is not None
+
+
+def claim(timeout: float, *, after_wait: str | None = None) -> dict | None:
     recover()
     with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
@@ -234,6 +248,8 @@ def claim(timeout: float) -> dict | None:
             logger.warning('Agent queue blocked by unconfirmed remote stop: task=%s run=%s. '
                            'Verify the remote agent has stopped, then use Agent Recovery on Board.',
                            blocked['task_id'] or '(deleted)', blocked['id'])
+            return None
+        if after_wait is not None and not wait_continuation_ready(connection, after_wait):
             return None
         task = connection.execute("SELECT * FROM board_tasks WHERE status = 'OPEN' AND init_uncertain = 0 AND agent_uncertain = 0 ORDER BY sort_order, id LIMIT 1").fetchone()
         if task is None:

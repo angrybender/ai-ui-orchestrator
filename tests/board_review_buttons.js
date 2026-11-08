@@ -51,11 +51,12 @@ const path = require('node:path');
         if (!standalone && status === 'ARCHIVE') continue;
         await open(status, standalone);
         assert.equal(await page.locator('#stop-task').isVisible(), status === 'IN PROGRESS');
-        for (const id of ['reopen-task', 'done-task']) assert.equal(await page.locator(`#${id}`).isVisible(), status === 'REVIEW');
+        assert.equal(await page.locator('#reopen-task').count(), 0);
+        assert.equal(await page.locator('#done-task').isVisible(), status === 'REVIEW');
       }
-      for (const [id, destination] of [['reopen-task', 'OPEN'], ['done-task', 'DONE']]) {
+      for (const [id, destination] of [['done-task', 'DONE']]) {
         await open('REVIEW', standalone);
-        if (process.env.REVIEW_TEST_SCREENSHOT && !standalone && destination === 'OPEN') await page.screenshot({ path: process.env.REVIEW_TEST_SCREENSHOT });
+        if (process.env.REVIEW_TEST_SCREENSHOT && !standalone && destination === 'DONE') await page.screenshot({ path: process.env.REVIEW_TEST_SCREENSHOT });
         await page.locator('#task-status').selectOption('BACKLOG');
         await page.locator('#task-title').fill('Unsaved title');
         await page.locator(`#${id}`).click();
@@ -70,7 +71,7 @@ const path = require('node:path');
         await page.waitForFunction(() => !document.querySelector('#task-form').dataset.spinnerActive);
         if (standalone) {
           assert.equal(await page.locator('#task-status').inputValue(), destination);
-          assert.equal(await page.locator('#reopen-task').isVisible(), false);
+          assert.equal(await page.locator('#reopen-task').count(), 0);
           assert.equal(await page.locator('#done-task').isVisible(), false);
           assert.equal(await page.locator('#archive-task').isVisible(), destination === 'DONE');
           assert.equal(await page.locator('#task-title').inputValue(), 'Review task');
@@ -94,11 +95,11 @@ const path = require('node:path');
     await page.locator('#cancel-task').click();
     await page.locator('#new-task-button').click();
     await page.waitForFunction(() => document.querySelector('#task-mode').value === 'create');
-    assert.equal(await page.locator('#reopen-task').isVisible(), false);
+    assert.equal(await page.locator('#reopen-task').count(), 0);
     assert.equal(await page.locator('#done-task').isVisible(), false);
     assert.equal(await page.locator('#stop-task').isVisible(), false);
     assert.deepEqual(errors, []);
-    console.log('PASS: REVIEW buttons visibility, OPEN/DONE transitions, spinner, duplicate prevention, errors, creation and both templates.');
+    console.log('PASS: REVIEW buttons visibility, DONE transition and absence of REOPEN, spinner, duplicate prevention, errors, creation and both templates.');
   } finally {
     await browser.close();
   }

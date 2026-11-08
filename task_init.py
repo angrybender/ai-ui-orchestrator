@@ -58,7 +58,7 @@ class Output:
         return text
 
 
-def stop_group(transport, pid):
+def stop_group(transport, pid, *, terminate=True):
     """Use a separate control channel and confirm absence, never trust close()."""
     if not pid:
         return False
@@ -67,9 +67,9 @@ def stop_group(transport, pid):
         control = transport.open_session(timeout=5)
         control.settimeout(5)
         # pid is parsed as a positive integer from our supervisor handshake.
-        command = (f"kill -TERM -- -{pid} 2>/dev/null; "
-                   f"sleep 0.1; kill -KILL -- -{pid} 2>/dev/null; "
-                   f"for n in 1 2 3 4 5 6 7 8 9 10; do "
+        signals = (f"kill -TERM -- -{pid} 2>/dev/null; "
+                   f"sleep 0.1; kill -KILL -- -{pid} 2>/dev/null; ") if terminate else ""
+        command = (signals + f"for n in 1 2 3 4 5 6 7 8 9 10; do "
                    f"kill -0 -- -{pid} 2>/dev/null || exit 0; "
                    f"states=$(ps -eo pgid=,stat=) || exit 1; "
                    f"living=$(printf '%s\\n' \"$states\" | awk '$1 == {pid} && $2 !~ /^Z/ {{ found=1 }} END {{ print found+0 }}') || exit 1; "

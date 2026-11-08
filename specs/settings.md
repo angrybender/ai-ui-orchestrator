@@ -147,6 +147,23 @@ Save сохраняет введённый `base_dir` вместе с полям
 
 Password-поля маскируются только визуально: сохранённое значение присутствует в HTML `value`, а успешный ответ Save возвращает `values`, включая секреты. Пустое значение не означает «сохранить прежнее»: оно проходит обычную валидацию. Это касается Remote server и Git proxy; правила выбора SSH-ключа и token — [git-proxy.md](git-proxy.md).
 
-Вкладка Agent содержит `shell` (required, big), `agent_timeout` (required, default `7200`) и `prompt` (required, text, default из метаданных). `continue_session_arg` не имеет поля формы: исполнитель читает его, если ключ заранее присутствует в `settings/user/agent.json`; обычный Save секции этот неизвестный ключ удаляет.
+Вкладка Agent содержит `shell` (required, big), `agent_timeout` (required, default `7200`), `acp_wait_background_tasks` (checkbox, title `ACP wait background tasks`, default `false`), `acp_background_quiet_timeout` (integer, required, title `ACP background quiet timeout (seconds)`, default `60`) и `prompt` (required, text, default из метаданных). Checkbox расположен в группе Agent shell после таймаута; текст подписи находится справа от checkbox. Непосредственно после checkbox расположено поле таймаута тишины ACP, в секундах. Значение — положительное целое число (≥ 1); пустое, ноль, отрицательное, дробное и JSON boolean недопустимы. Save сохраняет JSON integer в `agent.acp_background_quiet_timeout`; отсутствующий ключ получает default `60` без миграции пользовательского JSON. Поле доступно и сохраняется независимо от состояния checkbox. Отсутствующий ключ `acp_wait_background_tasks` в старой конфигурации означает выключенный режим. Save сохраняет boolean в `agent.acp_wait_background_tasks`; согласованный снимок исполнителя применяется к следующему захвату задачи. Выключение во время активного запуска не меняет его снимок. При выключенном режиме SSH/ACP и перевод в REVIEW работают по прежним правилам. Включённый режим автоматически выбирает подтверждённые Qwen либо AIR (Claude/Codex) ACP-расширения и ждёт фоновые задания и обработку их результата по [agent.md](agent.md#опциональное-ожидание-фоновой-работы-acp). `continue_session_arg` не имеет поля формы: исполнитель читает его, если ключ заранее присутствует в `settings/user/agent.json`; обычный Save секции этот неизвестный ключ удаляет.
 
 Ошибки серверной валидации стандартных настроек отображаются в Toast; обязательность и ограничения чисел дополнительно проверяются средствами браузера. Отдельных ошибок под каждым полем Settings нет.
+
+
+### Проверка ACP wait background tasks — 2026-10-21
+
+`tests/agent_background_ui.js` проверяет реальный Save и reload true/false на изолированных настройках, default off при отсутствующем ключе и отсутствие переполнения на 1357/375/320px. Desktop/mobile снимки визуально сверены с settings_proto.png и текущими текстовыми требованиями. `tests/settings_required.js` дополнительно прошёл без регрессий геометрии полей и обязательных звёздочек. Рабочие настройки не менялись.
+
+
+### Настройка периода тишины ACP — 2026-10-21
+
+Добавлено поле acp_background_quiet_timeout сразу после checkbox ожидания, в существующей группе Agent shell. Значение включено в снимок CONFIG_KEYS при claim. Настройка используется AIR backend Claude/Codex и не меняет Qwen conditional-close. Семантика — период без новой работы после завершения фоновых задач и финального хода; новые задачи/сообщения модели/вызовы инструментов сбрасывают отсчёт, общий agent_timeout не продлевается. При выключенном checkbox настройка не влияет на выполнение.
+
+Проверки настройки: 64 passed в test_settings_regressions.py, test_agent_worker.py и test_agent_background.py с -W error. Playwright agent_background_ui.js проверяет default=60, положение после checkbox, number/min=1/step=1, ввод, integer Save/reload при обоих значениях checkbox, отказ для пустого/нулевого/отрицательного/дробного значения и серверный отказ для boolean. settings_required.js прошёл без регрессий. Форма визуально сверена с settings_proto.png и main_ui.md на 1357/375px; отсутствие переполнения дополнительно проверено на 320px. Временные снимки удалены, рабочие настройки и данные не изменялись.
+
+
+AIR backend реализован: при включённом checkbox quiet timeout реально применяется после успешного хода/обработки учтённой фоновой работы. Поддержка определяется initialize capabilities без отдельного поля «тип агента». При выключенном checkbox таймаут не применяется. Подробнее — нормативный раздел agent.md; исторические результаты проверки одного поля выше сохранены.
+
+Проверки подключения обработчиков: Agent settings и Board live прошли Playwright без изменений UI. Runtime-проверки Qwen/AIR и периода тишины описаны в agent.md; значение из этой формы теперь применяется AIR backend и остаётся частью общего agent_timeout.
