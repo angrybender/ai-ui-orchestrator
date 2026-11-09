@@ -67,7 +67,7 @@ def test_cancel_stops_real_agent_and_descendant(tmp_path, monkeypatch, mode, tra
 
 def test_unconfirmed_stop_blocks_queue_and_reports_system_message(tmp_path, monkeypatch):
     harness = Harness(tmp_path, monkeypatch)
-    monkeypatch.setattr(agent_control, 'stop_group', lambda *_: False)
+    monkeypatch.setattr(agent_control, 'stop_group', lambda *_, **__: False)
     # The SSH fake must unblock local readers even when confirmation is lost.
     original_stop = agent_control.AgentControl.stop
     def stop(control):

@@ -155,9 +155,9 @@ def test_fork_rechecks_transient_process_verification_without_signals(fork_harne
     import agent_control
     original = agent_control.stop_group
     attempts = []
-    def verify(transport, pid, *, terminate=True):
+    def verify(transport, pid, *, terminate=True, **options):
         if terminate:
-            return original(transport, pid, terminate=True)
+            return original(transport, pid, terminate=True, **options)
         attempts.append(pid)
         if len(attempts) == 1 or not recovers:
             return False

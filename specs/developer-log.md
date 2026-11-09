@@ -248,3 +248,45 @@ SSH заменён локальным транспортом, рабочая Б�
 с -W error — 610 passed, 1 skipped (212,53 с), включая 25 тестов очереди.
 Playwright wait_queue_ui.js и board_live.js прошли на изолированных БД.
 Временные каталоги четырёх прогонов и собственные тестовые логи удалены.
+
+
+### 2026-11-03 — Полная живая проверка RouterAI
+
+ACP-01…26 и INT-01…07 выполнены для Codex и Claude с переданным отдельно
+ключом и endpoint https://routerai.ru/api/v1: 66 кейсов, 63 passed, 3 partial.
+История всех попыток сохранена в specs/routerai-live-results.json; новая таблица
+добавлена в agent-integration-tests.md, историческая матрица сохранена.
+Проверены Responses/Messages API и реальные shell, файлы, дочерние агенты,
+background lifecycle, HTTP-сервер, отмена, resume, потеря SDK, таймаут и SSH.
+В положительных INT-тестах quiet=60. В отрицательной проверке Claude SDK
+повторы отключены через CLAUDE_CODE_MAX_RETRIES=0; без этого SDK достигал
+внешнего таймаута. Для Claude SDK base URL используется /api, для wire API /api/v1.
+
+Исправлены PID для quoted-команд в Codex NativeWorkloads (воспроизведено
+на Python HTTP server), устаревший API тестового run-codex и слишком ранний
+SIGKILL оркестратора. Agent теперь получает до 3 секунд на собственную очистку
+после TERM; Init сохраняет 100 мс. Регрессия detached child падала до правки.
+Повтор INT-04 Codex оставил 0 процессов вместо 3; при неподтверждённом ACP-close
+сохраняется agent_uncertain и блокировка повторного запуска.
+
+Изменения отдельного форка acp-wrapper сохранены commit 1b3232d поверх 9524663
+и включены в приложение как применимый git-format-patch с инструкцией.
+Typecheck, build и полный Codex suite — 1519 passed, 36 skipped.
+run-codex проверен реальными положительным и отрицательным API-запросами.
+Python до изменения stop-group: 610 passed, 1 skipped; после — 611 passed,
+1 skipped; отдельно 61 проверка cancel/Init/strict drain прошла.
+Playwright wait_queue_ui.js и board_live.js прошли на изолированных данных.
+
+Partial не скрыты: finite-работа дочернего Claude нестабильна при раннем
+handback SDK; после разрыва SSH Codex/Claude требуют независимой очистки
+(выполнена) и сохраняют защитную блокировку повтора. Это ограничения
+подтверждённых гарантий, а не успешное выполнение этих сценариев.
+
+Прочитаны tech-spec.md, agent.md, agent-integration-tests.md и относящиеся
+записи developer-log.md; также инструкции и контракт/проверки отдельного форка.
+Спецификации обновлены, добавлен opt-in live-клиент в tests/live_acp_*.py.
+Production-настройки/БД не изменялись. Provider key не сохранён в git/отчёте;
+тестовые ключи, процессы, локальные и удалённые временные каталоги удалены.
+
+Дополнительно Playwright agent_cancel_ui.js прошёл для обеих форм, включая
+полные 60 секунд отмены и отсутствие живых agent/child после нового TERM-grace.

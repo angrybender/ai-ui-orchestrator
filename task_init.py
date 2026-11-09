@@ -58,23 +58,24 @@ class Output:
         return text
 
 
-def stop_group(transport, pid, *, terminate=True):
+def stop_group(transport, pid, *, terminate=True, term_grace=0.1):
     """Use a separate control channel and confirm absence, never trust close()."""
     if not pid:
         return False
     control = None
     try:
         control = transport.open_session(timeout=5)
-        control.settimeout(5)
+        grace = max(0.1, float(term_grace)) if terminate else 0
+        control.settimeout(5 + grace)
         # pid is parsed as a positive integer from our supervisor handshake.
+        probe = (f"kill -0 -- -{pid} 2>/dev/null || exit 0; "
+                 f"states=$(ps -eo pgid=,stat=) || exit 1; "
+                 f"living=$(printf '%s\\n' \"$states\" | awk '$1 == {pid} && $2 !~ /^Z/ {{ found=1 }} END {{ print found+0 }}') || exit 1; "
+                 f'[ "$living" = 0 ] && exit 0; ')
         signals = (f"kill -TERM -- -{pid} 2>/dev/null; "
-                   f"sleep 0.1; kill -KILL -- -{pid} 2>/dev/null; ") if terminate else ""
-        command = (signals + f"for n in 1 2 3 4 5 6 7 8 9 10; do "
-                   f"kill -0 -- -{pid} 2>/dev/null || exit 0; "
-                   f"states=$(ps -eo pgid=,stat=) || exit 1; "
-                   f"living=$(printf '%s\\n' \"$states\" | awk '$1 == {pid} && $2 !~ /^Z/ {{ found=1 }} END {{ print found+0 }}') || exit 1; "
-                   f'[ "$living" = 0 ] && exit 0; '
-                   f"sleep 0.1; done; exit 1")
+                   f"for ((n=0; n<{max(1, round(grace * 10))}; n++)); do " + probe +
+                   f"sleep 0.1; done; kill -KILL -- -{pid} 2>/dev/null; ") if terminate else ""
+        command = signals + "for n in 1 2 3 4 5 6 7 8 9 10; do " + probe + "sleep 0.1; done; exit 1"
         acknowledged = threading.Event()
         failed = []
         def launch_control():
@@ -88,7 +89,7 @@ def stop_group(transport, pid, *, terminate=True):
         launcher.start()
         if not acknowledged.wait(5) or failed:
             return False
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 5 + grace
         while not control.exit_status_ready():
             if time.monotonic() >= deadline or not transport.is_active():
                 return False

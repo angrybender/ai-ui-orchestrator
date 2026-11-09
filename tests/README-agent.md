@@ -40,3 +40,26 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. node tests/board_live.js
 
 Тест запускает отдельный локальный FastAPI с временной SQLite и использует отдельный процесс для изменений исполнителя. Рабочая очередь и реальный SSH не используются; сервер и временные данные очищаются после теста. Требуются Python-зависимости из `requirements.txt` и Playwright; пути окружения выше соответствуют окружению разработки проекта.
 
+
+
+### Живой ACP-прогон с провайдером
+
+Явный запуск `tests/live_acp_matrix.py` выполняет ACP-01…26 и INT-01…07
+для Codex и Claude на настроенном SSH-host. Используются платные модельные
+вызовы, отдельные удалённые cwd и временная локальная БД. Обычный pytest
+эти сценарии не запускает. Установленные адаптеры должны поддерживать
+orchestratorBackgroundTasks v1; для Codex доступен `--codex-binary`.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. dev-venv/bin/python tests/live_acp_matrix.py \
+  --key-file /private/routerai.key --endpoint https://routerai.ru/api/v1 \
+  --report /tmp/routerai-live.json
+```
+
+Выбор: `--agents codex` и `--cases ACP-20,INT-04`. Ключ читается из файла,
+не из argv; конфигурации SDK и ключ на VM удаляются после прогона вместе
+с собственными процессами и cwd. При SIGTERM запускается та же очистка.
+Отчёт хранит endpoint, test-root и результаты без ключа. `partial` означает
+подтверждённое ограничение, а не полную гарантию выполнения/очистки.
+Текущая матрица и история попыток — specs/agent-integration-tests.md и
+specs/routerai-live-results.json.
