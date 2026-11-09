@@ -84,8 +84,7 @@
         node.className = `chat-message ${message.role === "user" ? "chat-user" : "chat-agent"}`;
         const body = document.createElement("div");
         body.className = "chat-message-body";
-        const markdown = window.marked?.parse || window.marked?.marked;
-        const rendered = message.role !== "system" && typeof markdown === "function" ? markdown(message.text || "", { breaks: true }) : null;
+        const rendered = message.role !== "system" && window.safeMarkdown ? window.safeMarkdown.render(message.text || "") : null;
         if (message.role === "system") {
           body.textContent = message.text || "";
           body.style.whiteSpace = "pre-wrap";
@@ -93,7 +92,7 @@
           body.textContent = message.text || "";
           window.showToast("Markdown renderer unavailable", { type: "error" });
         } else {
-          body.innerHTML = rendered;
+          body.append(rendered);
         }
         const actions = document.createElement("div");
         actions.className = "chat-message-actions";
