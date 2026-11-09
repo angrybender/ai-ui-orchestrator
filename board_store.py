@@ -78,11 +78,12 @@ def init_database() -> None:
             CREATE TABLE IF NOT EXISTS task_chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_pk INTEGER NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('agent', 'user')),
+                role TEXT NOT NULL CHECK(role IN ('agent', 'user', 'system')),
                 text TEXT NOT NULL,
                 run_id TEXT,
                 updated_at TEXT NOT NULL,
-                UNIQUE(task_pk, run_id, role),
+                message_turn INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(task_pk, run_id, role, message_turn),
                 FOREIGN KEY(task_pk) REFERENCES board_tasks(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS task_chat_order ON task_chat_messages(task_pk, id);
@@ -169,16 +170,23 @@ def init_database() -> None:
         }.items():
             if name not in columns:
                 connection.execute(f'ALTER TABLE board_tasks ADD COLUMN {name} {definition}')
+        if not connection.in_transaction:
+            connection.execute('BEGIN IMMEDIATE')
+        chat_columns = {row['name'] for row in connection.execute('PRAGMA table_info(task_chat_messages)')}
         chat_sql = connection.execute("SELECT sql FROM sqlite_master WHERE name = 'task_chat_messages'").fetchone()[0]
-        if "'system'" not in chat_sql:
+        if "'system'" not in chat_sql or 'message_turn' not in chat_columns:
             connection.execute("ALTER TABLE task_chat_messages RENAME TO old_chat")
             connection.execute("""CREATE TABLE task_chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, task_pk INTEGER NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('agent', 'user', 'system')),
                 text TEXT NOT NULL, run_id TEXT, updated_at TEXT NOT NULL,
-                UNIQUE(task_pk, run_id, role),
+                message_turn INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(task_pk, run_id, role, message_turn),
                 FOREIGN KEY(task_pk) REFERENCES board_tasks(id) ON DELETE CASCADE)""")
-            connection.execute('INSERT INTO task_chat_messages SELECT id, task_pk, role, text, run_id, updated_at FROM old_chat')
+            turn = 'message_turn' if 'message_turn' in chat_columns else '0'
+            connection.execute('INSERT INTO task_chat_messages '
+                               '(id, task_pk, role, text, run_id, updated_at, message_turn) '
+                               f'SELECT id, task_pk, role, text, run_id, updated_at, {turn} FROM old_chat')
             connection.execute('DROP TABLE old_chat')
             connection.execute('CREATE INDEX task_chat_order ON task_chat_messages(task_pk, id)')
 
@@ -299,10 +307,10 @@ def add_user_comment(task_id: str, comment: str) -> dict[str, Any]:
     return get_chat(task_id)
 
 
-def upsert_agent_message(task_pk: int, run_id: str, text: str) -> None:
+def upsert_agent_message(task_pk: int, run_id: str, text: str, *, message_turn: int = 0) -> None:
     with closing(connect()) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
-        connection.execute("INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, 'agent', ?, ?, ?) ON CONFLICT(task_pk, run_id, role) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at", (task_pk, text, run_id, datetime.now().strftime("%Y-%m-%d %H:%M")))
+        connection.execute("INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at, message_turn) VALUES (?, 'agent', ?, ?, ?, ?) ON CONFLICT(task_pk, run_id, role, message_turn) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at", (task_pk, text, run_id, datetime.now().strftime("%Y-%m-%d %H:%M"), message_turn))
 
 
 def next_task_id() -> str:

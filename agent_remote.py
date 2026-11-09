@@ -519,6 +519,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
 
                     def background_request(method, params):
                         nonlocal next_id
+                        if method == 'session/prompt' and cycle:
+                            cycle.next_message()
                         number = next_id
                         next_id += 1
                         return rpc(stdin, stdout, number, method, params, diagnostics,

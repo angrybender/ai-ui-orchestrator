@@ -69,6 +69,7 @@ def init_database() -> None:
                                  'init_pid': 'INTEGER', 'init_result': 'TEXT',
                                  'agent_pid': 'INTEGER', 'cancel_requested_at': 'REAL',
                                  'executor_scope': 'TEXT',
+                                 'message_turn': 'INTEGER NOT NULL DEFAULT 0',
                                  'agent_stop_confirmed': 'INTEGER NOT NULL DEFAULT 0',
                                  'agent_uncertain': 'INTEGER NOT NULL DEFAULT 0',
                                  'init_uncertain': 'INTEGER NOT NULL DEFAULT 0'}.items():
@@ -138,11 +139,12 @@ def finish(run_id: str, error: str | None = None, stop_reason: str | None = None
         if error and row['task_pk'] is not None:
             updated_at = "strftime('%Y-%m-%d %H:%M', 'now', 'localtime')"
             connection.execute(
-                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, ?, ?, ?, {updated_at}) "
-                "ON CONFLICT(task_pk, run_id, role) DO UPDATE SET "
+                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at, message_turn) VALUES (?, ?, ?, ?, {updated_at}, ?) "
+                "ON CONFLICT(task_pk, run_id, role, message_turn) DO UPDATE SET "
                 "text = task_chat_messages.text || char(10) || char(10) || excluded.text, "
                 "updated_at = excluded.updated_at",
-                (row['task_pk'], 'system' if init_error or agent_uncertain or stop_reason == 'cancelled' else 'agent', error, run_id),
+                (row['task_pk'], 'system' if init_error or agent_uncertain or stop_reason == 'cancelled' else 'agent', error, run_id,
+                 0 if init_error or agent_uncertain or stop_reason == 'cancelled' else row['message_turn']),
             )
 
 
@@ -280,23 +282,23 @@ def claim(timeout: float, *, after_wait: str | None = None) -> dict | None:
 
 
 def message(run_id: str, text: str) -> None:
-    """Replace this run's already sanitized agent response, never its diagnostics."""
+    """Stream into this prompt's response, preserving earlier prompt responses."""
     with closing(board_store.connect()) as connection, connection:
         connection.execute('BEGIN IMMEDIATE')
-        row = connection.execute(f'SELECT task_pk FROM agent_runs WHERE id = ? AND {ACTIVE} AND EXISTS (SELECT 1 FROM board_tasks WHERE id = task_pk AND active_run_id = agent_runs.id)', (run_id,)).fetchone()
+        row = connection.execute(f'SELECT task_pk, message_turn FROM agent_runs WHERE id = ? AND {ACTIVE} AND EXISTS (SELECT 1 FROM board_tasks WHERE id = task_pk AND active_run_id = agent_runs.id)', (run_id,)).fetchone()
         if row is None or row['task_pk'] is None:
             return
         updated_at = "strftime('%Y-%m-%d %H:%M', 'now', 'localtime')"
         if isinstance(text, str) and text.strip():
             connection.execute(
-                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at) VALUES (?, 'agent', ?, ?, {updated_at}) "
-                "ON CONFLICT(task_pk, run_id, role) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
-                (row['task_pk'], text, run_id),
+                f"INSERT INTO task_chat_messages(task_pk, role, text, run_id, updated_at, message_turn) VALUES (?, 'agent', ?, ?, {updated_at}, ?) "
+                "ON CONFLICT(task_pk, run_id, role, message_turn) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
+                (row['task_pk'], text, run_id, row['message_turn']),
             )
         else:
             connection.execute(
-                f"UPDATE task_chat_messages SET updated_at = {updated_at} WHERE task_pk = ? AND role = 'agent' AND run_id = ?",
-                (row['task_pk'], run_id),
+                f"UPDATE task_chat_messages SET updated_at = {updated_at} WHERE task_pk = ? AND role = 'agent' AND run_id = ? AND message_turn = ?",
+                (row['task_pk'], run_id, row['message_turn']),
             )
 
 
