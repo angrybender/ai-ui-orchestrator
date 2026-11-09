@@ -42,28 +42,42 @@ const python = process.env.PYTHON || 'python3';
       await page.locator('#new-task-button').click();
       await expect(page.locator('#task-modal')).toBeVisible();
     };
-    const check = async (title, description) => {
+    const check = async (title, description, taskId) => {
+      if (taskId !== undefined) await expect(page.locator('#task-id')).toHaveValue(taskId);
       await expect(page.locator('#task-title')).toHaveValue(title);
       await expect(page.locator('#task-description')).toHaveValue(description);
     };
     await open();
+    const generatedId = await page.locator('#task-id').inputValue();
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('orchestrator.newTaskDraft')).task_id), generatedId);
+    await page.locator('#cancel-task').click();
+    await open();
+    await expect(page.locator('#task-id')).toHaveValue(generatedId);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await open();
+    await expect(page.locator('#task-id')).toHaveValue(generatedId);
+    await page.locator('#task-id').fill('DRAFT-42');
+    // An ID-only draft must also survive closing before either text field is filled.
+    await page.locator('#cancel-task').click();
+    await open();
+    await expect(page.locator('#task-id')).toHaveValue('DRAFT-42');
     await page.locator('#task-title').fill('  Черновик задачи  ');
     await page.locator('#task-description').fill('Описание\nВторая строка');
     for (const close of ['#cancel-task', '#close-task']) {
       await page.locator(close).click();
       await open();
-      await check('  Черновик задачи  ', 'Описание\nВторая строка');
+      await check('  Черновик задачи  ', 'Описание\nВторая строка', 'DRAFT-42');
     }
     await page.locator('#task-description').press('Escape');
     await expect(page.locator('#task-modal')).toBeHidden();
     await open();
-    await check('  Черновик задачи  ', 'Описание\nВторая строка');
+    await check('  Черновик задачи  ', 'Описание\nВторая строка', 'DRAFT-42');
     await page.locator('#task-modal').click({ position: { x: 2, y: 2 } });
     await open();
-    await check('  Черновик задачи  ', 'Описание\nВторая строка');
+    await check('  Черновик задачи  ', 'Описание\nВторая строка', 'DRAFT-42');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await open();
-    await check('  Черновик задачи  ', 'Описание\nВторая строка');
+    await check('  Черновик задачи  ', 'Описание\nВторая строка', 'DRAFT-42');
     await page.route('**/api/board/tasks', route => route.request().method() === 'POST'
       ? route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'Test conflict' }) })
       : route.continue());
@@ -71,7 +85,7 @@ const python = process.env.PYTHON || 'python3';
     await expect(page.locator('.toast[role="alert"]')).toContainText('Test conflict');
     await page.locator('#cancel-task').click();
     await open();
-    await check('  Черновик задачи  ', 'Описание\nВторая строка');
+    await check('  Черновик задачи  ', 'Описание\nВторая строка', 'DRAFT-42');
     await page.unroute('**/api/board/tasks');
     const savedId = await page.locator('#task-id').inputValue();
     await page.locator('#save-task').click();
@@ -79,6 +93,8 @@ const python = process.env.PYTHON || 'python3';
     assert.equal(await page.evaluate(() => localStorage.getItem('orchestrator.newTaskDraft')), null);
     await open();
     await check('', '');
+    assert.notEqual(await page.locator('#task-id').inputValue(), savedId);
+    await page.locator('#task-id').fill('ANOTHER-7');
     await page.locator('#task-title').fill('Другой черновик');
     await page.locator('#task-description').fill('Не менять при редактировании');
     await page.locator('#cancel-task').click();
@@ -101,11 +117,12 @@ const python = process.env.PYTHON || 'python3';
     const persisted = await (await context.request.get(`${info.url}/api/board/tasks/${savedId}`)).json();
     assert.equal(persisted.description, 'Повторное сохранение');
     if (process.env.TASK_DRAFT_SCREENSHOTS === '1') {
+      await page.locator('.toast').evaluateAll(nodes => nodes.forEach(node => node.remove()));
       await page.screenshot({ path: path.join(root, 'task-edit-desktop.png') });
     }
     await page.locator('#cancel-task').click();
     await open();
-    await check('Другой черновик', 'Не менять при редактировании');
+    await check('Другой черновик', 'Не менять при редактировании', 'ANOTHER-7');
     if (process.env.TASK_DRAFT_SCREENSHOTS === '1') {
       await page.screenshot({ path: path.join(root, 'task-draft-desktop.png') });
     }
@@ -126,6 +143,30 @@ const python = process.env.PYTHON || 'python3';
     await standalone.reload({ waitUntil: 'domcontentloaded' });
     await expect(standalone.locator('#task-description')).toHaveValue('Сохранение на отдельной странице');
     await standalone.close();
+    // Older drafts containing only text must retain that text and acquire an ID once.
+    await page.evaluate(() => localStorage.setItem('orchestrator.newTaskDraft', JSON.stringify({ title: 'Legacy title', description: 'Legacy body' })));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await open();
+    await check('Legacy title', 'Legacy body');
+    const legacyId = await page.locator('#task-id').inputValue();
+    await expect(page.locator('#task-id')).not.toHaveValue('');
+    await page.locator('#cancel-task').click();
+    // Restoring an ID must not depend on another ID-generation request succeeding.
+    let unexpectedIdRequests = 0;
+    await page.route('**/api/board/tasks/next-id', route => {
+      unexpectedIdRequests++;
+      return route.fulfill({ status: 503, json: { detail: 'ID service unavailable' } });
+    });
+    await open();
+    await check('Legacy title', 'Legacy body', legacyId);
+    assert.equal(unexpectedIdRequests, 0);
+    // A deliberately cleared ID is preserved as an empty value, not regenerated.
+    await page.locator('#task-id').fill('');
+    await page.locator('#cancel-task').click();
+    await open();
+    await check('Legacy title', 'Legacy body', '');
+    assert.equal(unexpectedIdRequests, 0);
+    await page.unroute('**/api/board/tasks/next-id');
     // Broken or inaccessible browser storage must not prevent task creation.
     for (const unavailable of [false, true]) {
       await page.addInitScript(block => {
@@ -138,18 +179,20 @@ const python = process.env.PYTHON || 'python3';
       await page.reload({ waitUntil: 'domcontentloaded' });
       await open();
       await check('', '');
+      const fallbackId = unavailable ? 'FALLBACK-2' : 'FALLBACK-1';
+      await page.locator('#task-id').fill(fallbackId);
       await page.locator('#task-title').fill('Memory fallback');
       await page.locator('#task-description').fill('Fallback description');
       await page.locator('#cancel-task').click();
       await open();
-      await check('Memory fallback', 'Fallback description');
+      await check('Memory fallback', 'Fallback description', fallbackId);
       await page.locator('#save-task').click();
       await expect(page.locator('#task-modal')).toBeHidden();
       await open();
       await check('', '');
     }
     assert.deepEqual(errors, []);
-    console.log('PASS: draft close/reopen, backdrop, reload, failed/successful creation, edit isolation, mobile, corrupt/unavailable storage.');
+    console.log('PASS: draft ID/title/body survive close/reopen/reload, ID-only and legacy drafts, no repeated ID request, empty ID, failed/successful creation, edit isolation, mobile and corrupt/unavailable storage.');
   } finally {
     if (browser) await browser.close();
     if (server.exitCode === null && server.signalCode === null && server.pid) {

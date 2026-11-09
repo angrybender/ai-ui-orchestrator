@@ -164,7 +164,7 @@
       .filter(Boolean);
   }
 
-  function openForm(task) {
+  function openForm(task, generatedTaskId = "") {
     const form = $("#task-form");
     if (!form) return;
     const mode = $("#task-mode");
@@ -183,9 +183,9 @@
     mode.value = task ? "edit" : "create";
     key.value = task ? task.task_id : "";
     dialogTitle.textContent = task ? `${task.task_id}` : "New task";
-    taskId.value = task ? task.task_id : "";
     taskId.readOnly = Boolean(task);
-    const draft = !task && window.taskDraft ? window.taskDraft.read() : { title: "", description: "" };
+    const draft = !task && window.taskDraft ? window.taskDraft.read() : { task_id: null, title: "", description: "" };
+    taskId.value = task ? task.task_id : (draft.task_id ?? generatedTaskId);
     title.value = task ? task.title : draft.title;
     description.value = task ? task.description : draft.description;
     status.replaceChildren();
@@ -220,6 +220,7 @@
       document.querySelectorAll("#attachment-list button").forEach((button) => { button.disabled = true; });
     }
     modal.hidden = false;
+    if (!task) saveDraft();
     if (window.taskChat) window.taskChat.open(task, (nextStatus) => {
       if (!editing || editing.status === nextStatus) return;
       editing.status = nextStatus;
@@ -255,6 +256,12 @@
       row.append(name, remove);
       list.append(row);
     });
+  }
+
+  function saveDraft() {
+    if (!editing && !$("#task-modal").hidden && window.taskDraft) {
+      window.taskDraft.write($("#task-title").value, $("#task-description").value, $("#task-id").value);
+    }
   }
 
   function closeForm() {
@@ -460,22 +467,21 @@
   document.addEventListener("DOMContentLoaded", () => {
     const form = $("#task-form");
     if (!form) return;
-    ["#task-title", "#task-description"].forEach((selector) => {
-      $(selector)?.addEventListener("input", () => {
-        if (!editing && !$("#task-modal").hidden && window.taskDraft) {
-          window.taskDraft.write($("#task-title").value, $("#task-description").value);
-        }
-      });
+    ["#task-id", "#task-title", "#task-description"].forEach((selector) => {
+      $(selector)?.addEventListener("input", saveDraft);
     });
     $("#new-task-button")?.addEventListener("click", async () => {
       if (form.dataset.spinnerActive === "true") return;
+      if (typeof window.taskDraft?.read().task_id === "string") {
+        openForm(null);
+        return;
+      }
       try {
         const response = await fetch("/api/board/tasks/next-id");
         if (!response.ok) return await apiError(response);
         const data = await response.json();
         if (form.dataset.spinnerActive === "true") return;
-        openForm(null);
-        $("#task-id").value = data.task_id;
+        openForm(null, data.task_id);
       } catch (error) { if (!error.reported) window.showToast(error.message || "Unable to generate task ID", { type: "error" }); }
     });
     $("#close-task")?.addEventListener("click", requestCloseForm);
