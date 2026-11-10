@@ -1,15 +1,5 @@
 ## Ход разработки: импрувы и фиксы
 
-### Ревью спецификаций по реализации — 2026-09-17
-
-В рамках этого ревью реализация принята источником истины. Проверены все девять Markdown-файлов `specs/`, пять PNG-прототипов, соответствующие контроллеры, хранилища, настройки, SSH/ACP/Init, прокси, шаблоны и клиентские скрипты. PNG сохранены как структурные схемы; отличия фактического UI описаны текстом. Код приложения и тестов не изменялся.
-
-После обновления `dev-venv` и установки `requirements.txt` полный Python-набор с `-W error`: **399 passed, 15 failed, 1 skipped**. Все 15 падений — в `tests/test_task_remote.py`: тестовая подмена `Config.get` не задаёт `tasks.logs_max_age`, поэтому lifespan падает на `time.time() - None` до запросов удаления. Это не подтверждает исправность этих 15 сценариев. Пропущена проверка реального WinAPI на Linux. Приведённые выше численные результаты прошлых реализаций — исторические, не результаты этого ревью.
-
-Playwright успешно выполнил `tests/task_cycle_ui.js`, `tests/http_proxy_ui.js`, `tests/settings_required.js`. Дополнительная проверка на изолированном FastAPI подтвердила меню и создание задачи, пагинацию Archive (21 задача), режим просмотра архивной задачи, возможность редактирования ARCHIVE через общий API, возврат тестового token в форме/Save, отклонение пустого token без ключа, сохранение относительного base_dir, Markdown/HTML и кнопку копирования в чате, отсутствие переполнения формы на ширинах 320/375/700px. Визуально просмотрены формы, Settings, карточка Init, чат и HTTP proxy в сравнении с исходными PNG.
-
-Браузерные проверки использовали изолированную БД/настройки и вымышленные данные; рабочие SSH/Git/upstream-серверы не изменялись. Реальная совместимость Git-команд и Windows в этом ревью не проверялась. Временные скрипты, БД и снимки после проверки удалены; тестовые raw-логи очищает session fixture, рабочие логи сохраняются.
-
 ### Исправление тестовой конфигурации после ревью — 2026-09-17
 
 В `tests/test_task_remote.py` три подмены общего метода `Config.get` заменены подменой ссылки `board_store.Config`. Все 15 ранее упавших сценариев теперь доходят до проверки удаления; lifespan использует обычный сервис настроек и default срока хранения логов. Код приложения и проверки ожидаемых результатов не изменены.
@@ -63,32 +53,16 @@ controllers/database.py принимает подтверждённый POST /ap
 Реальный smoke через изменённый `run_remote` на настроенной ВМ (Qwen Code 0.23.0, текущая модель), отдельный временный task cwd, флаг включён только в снимке теста: первый end_turn на 12,81 с; завершение фоновой команды с exitCode=0 подтверждено на 45,89 с; conditional close разрешён на 63,97 с после 18 отказов во время автоматического продолжения; содержимое probe.done проверено реальным ReadFile в этом продолжении, итоговый callback содержит BACKGROUND_VERIFIED_OK. `run_remote` вернулся успешно после штатного выхода ACP и проверки остановки группы. Оставшихся native процессов не обнаружено. Рабочие настройки/БД не менялись. Временные локальные и удалённые каталоги, скрипты, Qwen cache исследовательской сессии и снимки удалены; рабочие логи сохранены.
 
 
-### Проверка Claude/Codex с RouterAI — 2026-10-21
-
-Текущий opt-in backend подтверждён как Qwen-specific: на реальных @agentclientprotocol/codex-acp 2.2.2 и @agentclientprotocol/claude-agent-acp 0.94.0 вызов run_remote с флагом true завершается ошибкой отсутствия Qwen active-work support сразу после initialize, до создания/промпта сессии. Оба Qwen RPC также проверены напрямую и возвращают -32601. Это ограничение совместимости, не ошибка провайдера: оба агента успешно отвечали на openai/gpt-6-luna через RouterAI /api/v1, а оба wire API (Responses/Messages) дали HTTP 200.
-
-Нативные фоновые пробы с открытым ACP подтвердили ранний end_turn у обоих. Codex прислал terminal completion и exit_code=0 после окончания команды; для итоговой проверки понадобился второй prompt. Claude вернул completed для запуска Bash ещё при живом процессе, но сохранил backgroundTaskId, затем автоматически проверил результат. Для расширения поддержки требуются отдельные обработчики lifecycle Claude/Codex и стратегия финальной проверки Codex. UI/код приложения не менялись; полноценный успешный прогон текущей опции для этих агентов не заявляется.
-
-Агенты установлены на удалённой ВМ в /home/user/.local/share/acp-test-agents с symlinks в /home/user/.local/bin; локальная установка агентов не выполнялась. Конфигурация авторизации для проб была изолированной и временной, родные аккаунты не использовались. Подробные версии, проверки, наблюдения и источники — [agent.md](agent.md#совместимость-с-claude-и-codex-через-routerai--2026-10-21).
-
-
-### Найденный путь поддержки Claude/Codex — 2026-10-21
-
-На установленных удалённых codex-acp 2.2.2 и claude-agent-acp 0.94.0 реально согласованы AIR capabilities asyncTasks/nativeSubagentSessions/sessionFailure. Исследовательский клиент дождался нативной фоновой команды, отправил в ту же сессию финальный запрос проверки результата, получил end_turn и штатно закрыл оба ACP с exit=0. Это прототип, а не подключённый production backend. Текущий checkbox по-прежнему включает только Qwen backend.
-
-Предлагается выделить AIR backend: реестр (sessionId, asyncTaskId), учёт subagent lifecycle, ожидание и повторная финализация после новых задач, прежний общий deadline и error/cancel cleanup. Для строгой атомарности требуется remote wrapper/патч с conditional-close/drain, поскольку обычный session/close безусловно прерывает работу. У Claude 0.94.0 v1 нет описанного в main автономного async-turn; пустой task registry недостаточен. Для всех произвольных процессов требуется дополнительный supervisor/учёт shell workloads, а не только asyncTasks или PGID. Подробности и реальные времена — [agent.md](agent.md#решение-для-claudecodex-согласованный-asynctasks-и-финальный-ход--2026-10-21).
-
-
 ### Конфигурация периода тишины ACP — 2026-10-21
 
-settings/ui/agent.json добавляет required integer acp_background_quiet_timeout с default 60 непосредственно после acp_wait_background_tasks. Используются существующие number input с min=1/step=1 и серверная проверка integer; Save хранит JSON integer. Ключ agent.acp_background_quiet_timeout добавлен в agent_worker.CONFIG_KEYS и согласованный снимок запуска. Пользовательские JSON не изменяются при обновлении; отсутствующее значение читается из метаданных. AIR backend пока отсутствует: значение подготовлено для будущего ожидания тишины и не меняет текущий Qwen drain.
+settings/ui/agent.json добавляет required integer acp_background_quiet_timeout с default 60 непосредственно после acp_wait_background_tasks. Используются существующие number input с min=1/step=1 и серверная проверка integer; Save хранит JSON integer. Ключ agent.acp_background_quiet_timeout добавлен в agent_worker.CONFIG_KEYS и согласованный снимок запуска. Пользовательские JSON не изменяются при обновлении; отсутствующее значение читается из метаданных.
 
 
 ### AIR background backend — реализация 2026-10-21
 
 agent_background_air.py — отдельная логика AIR lifecycle, capability negotiation requirements, дерева subagents и активных tools, финального prompt с проверкой результата, монотонного quiet timeout, обработки sessionFailure и штатного close. agent_background.py сохраняет единственный bounded reader и Qwen drain, выбирая AIR по подтверждённым возможностям, без настройки имени агента. agent_remote.py предлагает оба протокола только при checkbox=true, восстанавливает реестр во время load без callback replay, сохраняет только root reply в чате, выбирает правильный cleanup close, ждёт ACP exit=0 и проверяет PGID без сигналов. При выключенном флаге поток выполнения сохраняется. Quiet timeout=60 по умолчанию включён в общий deadline; Qwen не получает дополнительную задержку. Новый статус БД, миграции и изменения адаптеров на ВМ не требуются.
 
-Предыдущие исследовательские записи о неподключённом AIR и неиспользуемой настройке теперь являются историческими. Практические гарантии и ограничения периода тишины определены в agent.md. Новые регрессии tests/test_agent_background_air.py используют реальные локальные ACP-процессы и изолированную БД; вместе с прежними Qwen проверяют позднюю/повторную работу, subagents, quiet reset, отказ/ошибки/EOF, cancel/timeout, replay и отключённый режим.
+Практические гарантии и ограничения периода тишины определены в agent.md. Новые регрессии tests/test_agent_background_air.py используют реальные локальные ACP-процессы и изолированную БД; вместе с прежними Qwen проверяют позднюю/повторную работу, subagents, quiet reset, отказ/ошибки/EOF, cancel/timeout, replay и отключённый режим.
 
 
 Проверки: полный Python-набор 557 passed, 1 skipped; после завершающих изменений drain/EOF/late-close — 57 passed в background/AIR/cancel. Playwright Agent settings и Board live прошли. Реальный run_remote успешно проверен на ВМ с Codex и Claude через RouterAI openai/gpt-6-luna, quiet=60, и с настроенным Qwen через его conditional-close. Подробные времена и границы проверок — agent.md. UI не менялся, производственные настройки/данные сохранены.
@@ -98,99 +72,24 @@ agent_background_air.py — отдельная логика AIR lifecycle, capab
 
 `agent_background_air.py` отделяет failed shell-команд от фатального sessionFailure; после end_turn разрешает обработку результата при ещё активных заданиях. Новый failed запускает сверку без ожидания всех остальных задач; отсутствие активности 30 секунд даёт модели ход для остановки ненужного сервера/watcher. Допускаются максимум три дополнительных prompt и абсолютный drain budget 300 секунд + quiet timeout внутри исходного agent_timeout. Только успешный TaskStop с task_id/shell_id в той же сессии подтверждает stopped без корректирующего completed. Неуспешный stop и неизвестный stopped не разрешают REVIEW. Реестры TaskStop ограничены вместе с остальным lifecycle.
 
-`agent_background.py` проверяет дополнительный deadline при чтении молчащего RPC и предоставляет внешнему executor deadline_error; AIR cleanup ограничен пятью секундами. Выход ACP после успешного close также ограничен пятью секундами, чтобы зависший shutdown не возвращал многочасовое ожидание. `agent_remote.py` проверяет его также в supervisor, чтобы заблокированная запись не удерживала запуск до большого agent_timeout. Прежние отмена, PGID-проверка, replay, санитизация и agent_uncertain сохраняются. Qwen backend и выключенный checkbox используют прежний путь. UI/настройки и схема БД не изменены. Подробные правила — [agent.md](agent.md#claudecodex-air-и-период-тишины).
+`agent_background.py` проверяет дополнительный deadline при чтении молчащего RPC и предоставляет внешнему executor deadline_error; AIR cleanup ограничен пятью секундами. Выход ACP после успешного close также ограничен пятью секундами, чтобы зависший shutdown не возвращал многочасовое ожидание. `agent_remote.py` проверяет его также в supervisor, чтобы заблокированная запись не удерживала запуск до большого agent_timeout. Прежние отмена, PGID-проверка, replay, санитизация и agent_uncertain сохраняются. Qwen backend и выключенный checkbox используют прежний путь. UI/настройки и схема БД не изменены. Подробные правила — [agent.md](agent.md#опциональное-ожидание-фоновой-работы-acp).
 
 Проверки: полный Python-набор 570 passed, 1 skipped; после завершающей защиты shutdown — 69 passed AIR/Qwen/cancel. Playwright agent_background_ui.js прошёл. Реальный run_remote с Claude Sonnet через RouterAI успешно обработал failed + остановку сервера (41,17 с, quiet=3) и сервер без failed (127,90 с, quiet=60); тестовые processes/cwd/caches удалены.
 
 
 ### Форк Claude ACP с явным drain — 2026-10-29
 
-`adapters/claude-background` содержит patch, installer и контракт для pinned
-upstream 0.96.0. Сборка относится только к Node-адаптеру на agent host;
-браузерный JS и запуск web-app не требуют нового build/server. Зависимости
-адаптера устанавливаются по upstream package-lock в отдельный prefix.
 `agent_background_claude.py` выбирается по явному подтверждению расширения,
 использует существующий единственный stdout reader, callbacks, deadline,
 cleanup и монополию БД. Дополнительные эвристические пределы обычного AIR
 backend к нему не применяются. Схема БД, статусы, UI и настройки не меняются.
-Нормативный контракт и границы гарантий — [agent.md](agent.md#claude-форк-с-явным-ожиданием-фоновой-работы).
+Нормативный контракт и границы гарантий — [agent.md](agent.md#опциональное-ожидание-фоновой-работы-acp).
 
 
 Итоговые проверки: Python **585 passed, 1 skipped**, background/AIR/Qwen/cancel
-**83 passed**, Playwright Agent settings успешно. На ВМ installer прошёл
-build/check и **790** ACP/async-task тестов; проверены native finite работа,
-повторные фоновые задания, failed+TaskStop, foreground и production quiet=60.
-Два падения полного upstream-набора воспроизведены без патча и описаны в agent.md.
+**83 passed**, Playwright Agent settings успешно.
 Неподтверждённая первая проверка PGID для форка повторяется один раз без сигналов;
 две неудачи сохраняют ошибку и неопределённость.
-
-
-### Материалы отдельного репозитория форка — 2026-10-29
-
-`adapters/claude-background` дополнен подробной установочной документацией,
-спецификацией RPC, результатами проверок, Apache LICENSE/NOTICE и Bash launcher
-для RouterAI. Повторная установка из подготовленного standalone-репозитория с
-`--test`: build/check и 790 тестов прошли, 10 skipped. Launcher проверен отдельно
-без реального provider key. Публикация в angrybender/acp-wrapper заблокирована
-HTTP 403 из-за прав PAT; commit сохранён в проверенном `acp-wrapper.bundle`.
-Полный результат и ограничения доступа описаны в agent.md. Код приложения,
-настройки production и установленный на ВМ runtime не изменены.
-
-
-Публикация acp-wrapper завершена после выдачи прав PAT: main содержит commit
-`20f455840131510a83ee071691bb46af4906d2d2`. Git ref и шесть опубликованных
-source/documentation файлов проверены через git/GitHub API. Предыдущая запись
-о HTTP 403 описывает устранённую блокировку. Временный checkout удалён.
-
-
-Документация acp-wrapper обновлена по запросу пользователя: из README удалён
-раздел «4. Настройка RouterAI», оставшиеся разделы перенумерованы, пример
-Agent shell использует установленный executable напрямую. Изменение опубликовано
-в main, commit `aee3f88e81e10273830776d1eb41e2054d8fa1bc`. Проверены нумерация, локальные ссылки,
-git diff --check и совпадение README с GitHub API. Код не менялся; тесты
-приложения не перезапускались. Локальные README и bundle синхронизированы.
-
-
-### Полная кодовая база Claude ACP fork — 2026-10-29
-
-По запросу пользователя patch-kit преобразован в полный source-форк в
-https://github.com/angrybender/acp-wrapper, main commit `971c9ea7c9ff02a38ea1d42d1498ca442d83812b`.
-Скопирована полная кодовая база upstream 0.96.0; все 320 исходных файлов
-проверены по upstream tree. README upstream сохранён как README.upstream.md,
-workflow/dependabot definitions перенесены в docs/upstream-workflows для
-справки без активации release/npm automation. В package.json указан репозиторий
-форка и private=true. Исходный патч применён к src/ и сохранён отдельно;
-изменения исходников ограничены четырьмя файлами прежнего патча, reverse-check
-подтверждает соответствие. UPSTREAM.json фиксирует base revision и SHA256.
-
-Installer теперь копирует build inputs из текущего checkout, не скачивает
-upstream и не применяет patch второй раз. Поддерживаются прямая сборка npm,
-изолированная runtime-установка, provenance source_revision/source_dirty и
-исполняемый symlink. README обновлён; удалённый ранее раздел настройки RouterAI
-не восстановлен. Контракт ACP и код оркестратора не менялись.
-
-Проверки: npm ci/build/check успешны. Полный source-suite: 3321 passed,
-33 skipped, 2 failed — те же ранее воспроизведённые upstream failures,
-описанные в docs/testing.md. Installer --test: 790 passed, 10 skipped;
-prefix/bin с пробелами, запуск executable, provenance и byte equality compiled
-JS с прямой сборкой проверены. Для чистого commit проверены source_revision и
-source_dirty=false. Через git ls-remote подтверждён commit main, через GitHub
-Trees API сопоставлены пути/mode/blob SHA всех 328 опубликованных файлов.
-Локальная полная кодовая база и bundle в adapters/claude-background обновлены;
-временные checkout, node_modules/dist и runtime проверки удалены. Прочитаны
-относящиеся agent.md, tech-spec.md и AGENTS.md исходного проекта. UI и Python-код
-приложения не менялись; новые Python/Playwright прогоны не требовались.
-
-### 2026-11-02 — Codex backend acp-wrapper
-
-Добавлен полный Codex ACP 2.2.2 рядом с Claude, отдельный installer/lockfile/CI,
-строгий snapshot/conditional close, OS ownership и подтверждённый stop. Исправлены
-гонка Bash после убийства sleep, cleanup app-server helpers и ESRCH при чтении
-исчезающего процесса. Codex: 1516 passed / 36 skipped; installer 56 passed.
-VM ACP-01..26 проверены; INT-01..07 — с адаптациями, INT-04/05 частично:
-retry blocked подтверждён, оставшиеся процессы очищены независимо.
-Python 86 passed, Claude targeted 790 passed / 10 skipped, Playwright Agent
-settings прошёл. Детали — [codex-support.md](codex-support.md).
 
 
 ### 2026-11-03 — Продолжение OPEN после WAIT
@@ -262,17 +161,12 @@ background lifecycle, HTTP-сервер, отмена, resume, потеря SDK,
 повторы отключены через CLAUDE_CODE_MAX_RETRIES=0; без этого SDK достигал
 внешнего таймаута. Для Claude SDK base URL используется /api, для wire API /api/v1.
 
-Исправлены PID для quoted-команд в Codex NativeWorkloads (воспроизведено
-на Python HTTP server), устаревший API тестового run-codex и слишком ранний
-SIGKILL оркестратора. Agent теперь получает до 3 секунд на собственную очистку
+Исправлен слишком ранний SIGKILL оркестратора. Agent теперь получает
+до 3 секунд на собственную очистку
 после TERM; Init сохраняет 100 мс. Регрессия detached child падала до правки.
 Повтор INT-04 Codex оставил 0 процессов вместо 3; при неподтверждённом ACP-close
 сохраняется agent_uncertain и блокировка повторного запуска.
 
-Изменения отдельного форка acp-wrapper сохранены commit 1b3232d поверх 9524663
-и включены в приложение как применимый git-format-patch с инструкцией.
-Typecheck, build и полный Codex suite — 1519 passed, 36 skipped.
-run-codex проверен реальными положительным и отрицательным API-запросами.
 Python до изменения stop-group: 610 passed, 1 skipped; после — 611 passed,
 1 skipped; отдельно 61 проверка cancel/Init/strict drain прошла.
 Playwright wait_queue_ui.js и board_live.js прошли на изолированных данных.
@@ -319,15 +213,6 @@ Production-настройки/БД не изменялись. Provider key не 
 Прочитаны task-chat.md, agent.md, tech-spec.md, main_ui.md, относящиеся разделы board.md и developer-log.md; просмотрены task-chat-status.png и task-edit-create-form.png. После обновления dev-venv из requirements.txt полный Python-набор с -W error: 619 passed, 1 skipped (Windows), 243,10 с. Новые регрессии проверяют миграции с/без system и дат, повторный startup, сохранность истории/дат, ошибки без ответа, отмену и одинаковые ответы. Реальные локальные ACP-процессы проверяют обычный AIR и wrapper, включая шесть дополнительных ходов; удалённый SSH заменён тестовым транспортом.
 
 Playwright tests/agent_chat_turns.js и tests/task_cycle_ui.js прошли на изолированном FastAPI/SQLite. Проверены основной и два дополнительных ответа с одним run_id, потоковое обновление текущей записи, неизменность первой, перезагрузка, обе формы на 1459/375px. Снимки desktop/mobile визуально сверены с макетами и актуальными текстовыми требованиями, в том числе мобильный чат после прокрутки формы. Новые постоянные регрессии добавлены в git. Рабочая БД, production venv и удалённые агенты не использовались. Временные каталоги pytest, снимки и тестовые процессы удалены; тестовые raw-логи очищены session fixture, рабочие логи сохранены.
-
-
-### Универсальный launcher отдельного acp-wrapper — 2026-11-09
-
-В отдельном checkout dev/acp-wrapper реализован и отправлен в main commit ac8dc81685d96b7ad14cc6be1fdfa558ea332cb0: первый аргумент после launcher задаёт путь к нативному Claude/Codex; версия определяет backend, CLI-флаги применяются к SDK/App Server и начальным ACP-настройкам. Обычный installer включает оба runtime; совместимость без пути, --version, --cli, standalone Codex, существующие destination/provenance сохранены. Обновлены README, нормативные docs/launcher.md и docs/codex.md, результаты docs/testing.md и upstream patch/SHA256. В agent.md добавлен новый синтаксис.
-
-Прочитаны specs/agent.md, agent-integration-tests.md, относящиеся settings.md и developer-log.md, инструкции и контракт/тестовые требования обоих backend отдельного репозитория. Build/lint/format и Codex typecheck прошли. Новые root-тесты: 29 passed. Полный Codex: 1532 passed, 36 skipped. Полный Claude: 3351 passed, 33 skipped, 1 ранее описанное upstream-падение tools.test.ts cache/mtime; повтор отдельно дал 249 passed, 1 failed вместе с новыми тестами. Полный Claude не объявляется зелёным. Исправлена только переносимость прежнего normalize-теста относительно process.execPath; кеш skills и его тест не менялись.
-
-Настоящий install.py --test в prefix/bin с пробелами: 819 Claude/launcher passed, 10 skipped и 71 Codex passed. Проверены обе provenance-записи/production deps, отказы overwrite/missing-agent и legacy CLI. Реальные локальные native CLIs прошли initialize/background handshake из checkout и установленного runtime; Codex создал сессию --yolo с agent-full-access. Model prompts и платный провайдер не использовались. Production venv и runtime/сессии на VM не изменялись. Временная установка, staging, auth/cwd, credential helper и созданные build/dependency-каталоги удалены после проверки; GitHub-токен не сохранён в Git или URL. Push в main подтверждён ls-remote.
 
 
 ### Уведомление о блокировке очереди Agent Recovery — 2026-11-10
