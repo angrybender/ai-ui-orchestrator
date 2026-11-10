@@ -12,7 +12,9 @@
     connection.addEventListener("board", (event) => {
       if (source !== connection) return;
       try {
-        receive(JSON.parse(event.data).tasks);
+        const data = JSON.parse(event.data);
+        window.agentRecovery?.notify(data.recovery_runs || []);
+        receive(data.tasks);
         disconnected = false;
       } catch (error) {
         window.showToast("Unable to update Board", { type: "error" });

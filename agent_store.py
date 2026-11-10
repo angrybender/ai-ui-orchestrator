@@ -16,6 +16,16 @@ ACTIVE = "state IN ('PREPARING', 'RUNNING')"
 logger = logging.getLogger(__name__)
 
 
+def recovery_candidates() -> list[dict]:
+    """Completed runs whose unconfirmed remote stop blocks the queue."""
+    with closing(board_store.connect()) as connection:
+        rows = connection.execute(
+            "SELECT r.id AS run_id, t.task_id FROM agent_runs r LEFT JOIN board_tasks t ON t.id = r.task_pk "
+            "WHERE r.agent_uncertain = 1 AND r.state NOT IN ('PREPARING', 'RUNNING') ORDER BY r.created_at, r.id"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def confirm_remote_stop(run_id: str) -> None:
     """Operator attestation AFTER checking the remote process is gone.
 
