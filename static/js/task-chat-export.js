@@ -13,6 +13,9 @@
     .message-meta time { margin-left:auto; }
     .message-body > :first-child { margin-top:0; }
     .message-body > :last-child { margin-bottom:0; }
+    .message-body blockquote { margin:10px 0; padding:8px 12px; border-left:4px solid #7161e8; border-radius:0 6px 6px 0; background:#f1edff; color:#494357; }
+    .message-body blockquote > :first-child { margin-top:0; }
+    .message-body blockquote > :last-child { margin-bottom:0; }
     .plain-text { white-space:pre-wrap; }
     pre { max-width:100%; overflow:auto; padding:10px; border-radius:5px; background:#e7e7eb; }
     code { font-family:ui-monospace,monospace; }

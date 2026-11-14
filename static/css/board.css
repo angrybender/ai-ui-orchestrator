@@ -15,6 +15,9 @@
 .chat-message-body { line-height:1.45; }
 .chat-message-body > :first-child { margin-top:0; }
 .chat-message-body > :last-child { margin-bottom:0; }
+.chat-message-body blockquote { margin:10px 0; padding:8px 12px; border-left:4px solid #7161e8; border-radius:0 6px 6px 0; background:#f1edff; color:#494357; }
+.chat-message-body blockquote > :first-child { margin-top:0; }
+.chat-message-body blockquote > :last-child { margin-bottom:0; }
 .chat-message-body pre { overflow:auto; padding:8px; border-radius:5px; background:#e7e7eb; }
 .chat-message-body code { font-family:ui-monospace,monospace; }
 .chat-message-body table { display:block; max-width:100%; overflow-x:auto; border-collapse:collapse; margin:10px 0; font-size:inherit; }
