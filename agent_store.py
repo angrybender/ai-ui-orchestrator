@@ -282,11 +282,13 @@ def claim(timeout: float, *, after_wait: str | None = None) -> dict | None:
             (task['id'],),
         ).fetchone()
         previous = connection.execute(
-            "SELECT session_id FROM agent_runs WHERE task_pk = ? AND session_id IS NOT NULL AND session_id != '' ORDER BY created_at DESC LIMIT 1",
+            "SELECT rowid AS run_order, session_id FROM agent_runs WHERE task_pk = ? "
+            "AND session_id IS NOT NULL AND session_id != '' ORDER BY rowid DESC LIMIT 1",
             (task['id'],),
         ).fetchone()
         return {'id': run_id, 'task_id': task['task_id'], 'comment': comment['text'] if comment else None,
-                'session_id': previous['session_id'] if previous else None,
+                'session_id': previous['session_id'] if previous and previous['run_order'] > task['acp_reset_after_run'] else None,
+                'has_session_context': bool(previous),
                 'remote_cwd': task['remote_cwd'], 'remote_identity': task['remote_identity'],
                 'context_ready': bool(task['context_ready']), 'init_succeeded': bool(task['init_succeeded'])}
 

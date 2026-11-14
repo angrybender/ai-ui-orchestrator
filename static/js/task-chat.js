@@ -9,7 +9,7 @@
   let failed = false;
   let pendingData = null;
   let initialScrollPending = false;
-  let panel, messages, composer, input, button;
+  let panel, messages, composer, input, button, clearButton;
 
   function spinnerActive() {
     return document.querySelector("#task-form")?.dataset.spinnerActive === "true";
@@ -48,12 +48,14 @@
     panel.className = "task-chat";
     panel.setAttribute("aria-label", "Task comments");
     panel.hidden = true;
-    panel.innerHTML = '<div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div><div id="chat-composer" class="chat-composer"><label for="chat-comment">User comment</label><textarea id="chat-comment" rows="2" placeholder="user comment" maxlength="32000"></textarea><p class="field-error" id="chat-error" role="alert"></p><div class="form-actions"><button class="button" id="send-comment" type="button">Send comment</button></div></div>';
+    panel.innerHTML = '<div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div><div id="chat-composer" class="chat-composer"><label for="chat-comment">User comment</label><textarea id="chat-comment" rows="2" placeholder="user comment" maxlength="32000"></textarea><p class="field-error" id="chat-error" role="alert"></p><div class="form-actions"><button class="button" id="clear-context" type="button" hidden title="Start a new agent session on the next run; keep files and chat history">Clear context</button><button class="button" id="send-comment" type="button">Send comment</button></div></div>';
     form.append(panel);
     messages = panel.querySelector("#chat-messages");
     composer = panel.querySelector("#chat-composer");
     input = panel.querySelector("#chat-comment");
     button = panel.querySelector("#send-comment");
+    clearButton = panel.querySelector("#clear-context");
+    clearButton.addEventListener("click", clearContext);
     input.addEventListener("input", resizeComment);
     let previousWidth = 0;
     new ResizeObserver(() => {
@@ -120,6 +122,7 @@
       lastContent = content;
       messages.scrollTop = scrollTop;
     }
+    clearButton.hidden = data.can_clear_context !== true;
     composer.hidden = !["BACKLOG", "REVIEW", "WAIT"].includes(data.status);
     panel.hidden = !data.messages.length && composer.hidden;
     document.querySelector(".task-dialog").classList.toggle("has-chat", !panel.hidden);
@@ -202,6 +205,31 @@
       if (!error.reported) window.showToast("Unable to send comment", { type: "error" });
     } finally {
       if (window.spinner) window.spinner.stop(button);
+      applyPending();
+      if (current && token === generation) poll(token);
+    }
+  }
+
+  async function clearContext() {
+    if (!current || clearButton.hidden || clearButton.disabled || spinnerActive()) return;
+    if (window.spinner && !window.spinner.start(clearButton)) return;
+    const label = clearButton.querySelector(".spinner + span");
+    if (label) label.textContent = "Clearing…";
+    clearTimeout(timer);
+    controller?.abort();
+    pendingData = null;
+    const token = ++generation;
+    try {
+      const response = await fetch(`/api/board/tasks/${encodeURIComponent(current.id)}/clear-context`, { method: "POST" });
+      const data = await readResponse(response);
+      if (data && token === generation) {
+        render(data);
+        window.showToast("Context cleared. The next run will start a new session.");
+      }
+    } catch (error) {
+      if (!error.reported) window.showToast("Unable to clear agent context", { type: "error" });
+    } finally {
+      if (window.spinner) window.spinner.stop(clearButton);
       applyPending();
       if (current && token === generation) poll(token);
     }

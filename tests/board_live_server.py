@@ -26,7 +26,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--wait-queue', action='store_true', help='Use local test executors for agent/run.')
     parser.add_argument("--directory", type=Path)
-    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "agent-uncertain", "message", "next-message", "context-conflict"))
+    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "agent-uncertain", "message", "next-message", "context-conflict", "session"))
     parser.add_argument("--run-id")
     parser.add_argument('--message-text', default='Agent response after retry')
     args = parser.parse_args()
@@ -43,6 +43,9 @@ def main() -> None:
             result = agent_store.claim(300)
             if result is None:
                 raise RuntimeError("No task was claimed")
+        elif args.operation == 'session':
+            agent_store.session(args.run_id, args.message_text)
+            result = {'session': args.message_text}
         elif args.operation in ('init', 'agent'):
             from task_cycle import TaskCycle
             TaskCycle({'id': args.run_id}, {'tasks.init_script_timeout': 300, 'agent.agent_timeout': 300}).phase('Init' if args.operation == 'init' else 'Agent')

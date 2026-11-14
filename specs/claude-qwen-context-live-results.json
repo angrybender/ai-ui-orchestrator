@@ -1,0 +1,248 @@
+{
+  "date": "2026-11-14",
+  "remote_host": "192.168.1.240:2222",
+  "settings_source": "Claude temporarily uses existing remote Qwen API/model/credential; permanent settings unchanged",
+  "wait_background_tasks": true,
+  "quiet_timeout": 60,
+  "results": [
+    {
+      "agent": "claude",
+      "command": "/home/user/.local/bin/acp-wrapper /home/user/.local/bin/claude --dangerously-skip-permissions",
+      "phases": [
+        {
+          "phase": "initial",
+          "seconds": 81.02,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt"
+          ],
+          "session_id": "d320594c-d2a5-43c5-ae86-f9a73cd5d276",
+          "model_ids": [
+            "opus"
+          ],
+          "background_snapshots": 64,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "resume_before_clear",
+          "seconds": 65.26,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/load",
+            "session/prompt"
+          ],
+          "session_id": "d320594c-d2a5-43c5-ae86-f9a73cd5d276",
+          "model_ids": [
+            "opus"
+          ],
+          "background_snapshots": 64,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "new_after_clear",
+          "seconds": 74.69,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt"
+          ],
+          "session_id": "6e96f4c7-495e-4811-9381-5e6cbe1f573c",
+          "model_ids": [
+            "opus"
+          ],
+          "background_snapshots": 65,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "resume_after_clear",
+          "seconds": 66.99,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/load",
+            "session/prompt"
+          ],
+          "session_id": "6e96f4c7-495e-4811-9381-5e6cbe1f573c",
+          "model_ids": [
+            "opus"
+          ],
+          "background_snapshots": 66,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        }
+      ],
+      "sessions": [
+        "d320594c-d2a5-43c5-ae86-f9a73cd5d276",
+        "6e96f4c7-495e-4811-9381-5e6cbe1f573c"
+      ],
+      "status": "passed",
+      "old_memory_resumed": true,
+      "new_session_created": true,
+      "old_memory_absent": true,
+      "artifact_preserved": true,
+      "new_session_resumed": true,
+      "reset_idempotent": true,
+      "reset_survives_startup": true,
+      "residual_processes": 0,
+      "seconds": 288.3
+    }
+  ],
+  "claude_provider": {
+    "base_url": "http://192.168.1.250:8080",
+    "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+    "source": "existing Qwen provider",
+    "credential_returned_to_local_runner": false,
+    "configuration_scope": "temporary test root"
+  },
+  "cleanup": {
+    "removed_cache_files": 0,
+    "removed_codex_threads": 0,
+    "remaining_processes": 0,
+    "remote_root_removed": true
+  },
+  "remote_settings_unchanged": true,
+  "independent_cleanup_audit": {
+    "remaining_remote_test_roots": 0,
+    "remaining_test_processes": 0
+  },
+  "verdict": "full_scenario_passed_on_repeat; initial session/new failure not reproduced",
+  "summary": {
+    "successful_full_attempts": 1,
+    "failed_attempts": 1,
+    "successful_model_phases_in_final_attempt": 4,
+    "initial_failure_cause": "not_identified"
+  },
+  "attempt_history": [
+    {
+      "purpose": "first full attempt",
+      "results": [
+        {
+          "agent": "claude",
+          "command": "/home/user/.local/bin/acp-wrapper /home/user/.local/bin/claude --dangerously-skip-permissions",
+          "phases": [
+            {
+              "phase": "initial",
+              "seconds": 80.99,
+              "exit_code": 0,
+              "status": "REVIEW",
+              "methods": [
+                "initialize",
+                "session/new",
+                "session/prompt"
+              ],
+              "session_id": "f941454f-bb76-4d62-9e81-a78953d816f7",
+              "model_ids": [
+                "opus"
+              ],
+              "background_snapshots": 66,
+              "stop_reason": "end_turn",
+              "active_reset_rejected": true,
+              "history_preserved": true,
+              "remaining_processes": 0
+            },
+            {
+              "phase": "resume_before_clear",
+              "seconds": 65.26,
+              "exit_code": 0,
+              "status": "REVIEW",
+              "methods": [
+                "initialize",
+                "session/load",
+                "session/prompt"
+              ],
+              "session_id": "f941454f-bb76-4d62-9e81-a78953d816f7",
+              "model_ids": [
+                "opus"
+              ],
+              "background_snapshots": 64,
+              "stop_reason": "end_turn",
+              "active_reset_rejected": true,
+              "history_preserved": true,
+              "remaining_processes": 0
+            },
+            {
+              "phase": "new_after_clear",
+              "seconds": 1.01,
+              "exit_code": 1,
+              "status": "WAIT",
+              "methods": [
+                "initialize",
+                "session/new"
+              ],
+              "session_id": null,
+              "model_ids": [
+                "opus"
+              ],
+              "background_snapshots": 0,
+              "stop_reason": null,
+              "active_reset_rejected": true,
+              "history_preserved": true,
+              "failure_category": "remote_execution_failed",
+              "error_label": "ACP request failed"
+            }
+          ],
+          "sessions": [
+            "f941454f-bb76-4d62-9e81-a78953d816f7"
+          ],
+          "status": "failed",
+          "reason": "AssertionError",
+          "residual_processes": 0,
+          "seconds": 147.47
+        }
+      ],
+      "cleanup": {
+        "removed_cache_files": 0,
+        "removed_codex_threads": 0,
+        "remaining_processes": 0,
+        "remote_root_removed": true
+      },
+      "remote_settings_unchanged": true,
+      "note": "session/new failed before persisting ID after reset; detailed sanitized error was not captured in that driver revision"
+    }
+  ],
+  "additional_session_creation_probe": {
+    "sessions_created_without_model_prompts": 8,
+    "full_secret_validation_passed": 8,
+    "failure_reproduced": false
+  },
+  "independent_trace_checks": {
+    "fresh_id_differs_from_initial": true,
+    "final_load_uses_fresh_id": true,
+    "old_nonce_absent_from_fresh_outgoing_prompts": true,
+    "end_turn_phases": 4,
+    "unique_live_tool_kinds": {
+      "initial": {
+        "read": 2,
+        "edit": 1,
+        "execute": 1
+      },
+      "resume_before_clear": {},
+      "new_after_clear": {
+        "read": 2,
+        "execute": 1
+      },
+      "resume_after_clear": {}
+    },
+    "answer_markers_verified_by": "driver chat API assertions; independent review did not recheck answer text"
+  },
+  "model_resolution_note": "ACP reports the logical alias opus; ANTHROPIC_DEFAULT_OPUS_MODEL resolves it to the existing Qwen provider model recorded above"
+}

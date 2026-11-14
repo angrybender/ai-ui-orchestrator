@@ -167,6 +167,7 @@ def init_database() -> None:
             'init_succeeded': 'INTEGER NOT NULL DEFAULT 0',
             'init_uncertain': 'INTEGER NOT NULL DEFAULT 0',
             'agent_uncertain': 'INTEGER NOT NULL DEFAULT 0',
+            'acp_reset_after_run': 'INTEGER NOT NULL DEFAULT 0',
         }.items():
             if name not in columns:
                 connection.execute(f'ALTER TABLE board_tasks ADD COLUMN {name} {definition}')
@@ -204,7 +205,7 @@ def _serialize(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
     task = dict(row)
     task["is_error"] = bool(task["is_error"])
     task["attachments"] = _attachments(connection, task.pop("id"))
-    for private in ('active_run_id', 'remote_cwd', 'remote_identity', 'context_ready', 'init_succeeded', 'init_uncertain'):
+    for private in ('active_run_id', 'remote_cwd', 'remote_identity', 'context_ready', 'init_succeeded', 'init_uncertain', 'acp_reset_after_run'):
         task.pop(private, None)
     return task
 
@@ -280,7 +281,9 @@ def _delete_task(task_id: str, required_status: str) -> None:
 
 def get_chat(task_id: str) -> dict[str, Any]:
     with closing(connect()) as connection, connection:
-        task = connection.execute("SELECT id, status FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
+        from task_session import can_clear_context
+
+        task = connection.execute("SELECT * FROM board_tasks WHERE task_id = ?", (task_id,)).fetchone()
         if task is None:
             raise TaskNotFoundError("Task not found")
         rows = connection.execute(
@@ -288,7 +291,8 @@ def get_chat(task_id: str) -> dict[str, Any]:
             "WHERE task_pk = ? ORDER BY id",
             (task["id"],),
         ).fetchall()
-        return {"status": task["status"], "messages": [dict(row) for row in rows]}
+        return {"status": task["status"], "messages": [dict(row) for row in rows],
+                "can_clear_context": can_clear_context(connection, task)}
 
 
 def add_user_comment(task_id: str, comment: str) -> dict[str, Any]:

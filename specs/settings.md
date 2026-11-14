@@ -167,3 +167,28 @@ Password-поля маскируются только визуально: сох
 AIR backend реализован: при включённом checkbox quiet timeout реально применяется после успешного хода/обработки учтённой фоновой работы. Поддержка определяется initialize capabilities без отдельного поля «тип агента». При выключенном checkbox таймаут не применяется. Подробнее — нормативный раздел agent.md; исторические результаты проверки одного поля выше сохранены.
 
 Проверки подключения обработчиков: Agent settings и Board live прошли Playwright без изменений UI. Runtime-проверки Qwen/AIR и периода тишины описаны в agent.md; значение из этой формы теперь применяется AIR backend и остаётся частью общего agent_timeout.
+
+
+### Общий API для Claude и Codex: проверка VM 2026-11-14
+
+Текущий Codex на настроенной VM использует `auth_mode=chatgpt` и `codex login status` сообщает Logged in using ChatGPT. В `~/.codex/config.toml` есть только секция tui: custom model_provider/base_url не заданы; `OPENAI_API_KEY` отсутствует. Это подписочная авторизация Codex, а не конфигурация общего API для нескольких CLI.
+
+Claude Code не может перенять такую авторизацию одной настройкой: `ANTHROPIC_BASE_URL` выбирает endpoint формата Anthropic Messages (`/v1/messages`), а не OpenAI Responses. Для общего провайдера необходимы поддерживаемый Messages endpoint, соответствующая авторизация и модель, которую обслуживает этот endpoint. Источники — [форматы gateway Claude Code](https://code.claude.com/docs/en/llm-gateway-protocol), [подключение gateway](https://code.claude.com/docs/en/llm-gateway-connect), [авторизация Codex](https://learn.chatgpt.com/docs/auth).
+
+На VM оба Claude settings-файла отсутствуют и Claude auth status возвращает loggedIn=false/authMethod=none. Совместимый с обоими CLI API из конфигурации Codex не обнаружен, поэтому удалённые настройки не изменялись и OAuth-токены не копировались. Чтобы выполнить такое подключение, сначала нужен доступный Anthropic-compatible API/gateway с подходящими реквизитами. Это ограничение текущей конфигурации, а не подтверждение неработоспособности всех сторонних gateway.
+
+
+### Claude Code с текущим провайдером Qwen: проверка VM 2026-11-14
+
+Текущий Qwen использует `http://192.168.1.250:8080/v1`, модель `qwen3.8-flash-next-unsloth-ud-q4_k_xl` и credential из существующего `STRATA_API_KEY` в настройках Qwen. Этот же сервис фактически поддерживает Anthropic Messages: GET `/v1/models` и POST `/v1/messages` вернули HTTP 200, сообщение assistant/end_turn содержит API_OK.
+
+Временная конфигурация Claude Code использует `ANTHROPIC_BASE_URL=http://192.168.1.250:8080` (без `/v1`), `ANTHROPIC_AUTH_TOKEN` с тем же ключом провайдера, `ANTHROPIC_MODEL` с указанным ID Qwen. DEFAULT_SONNET/OPUS/HAIKU_MODEL также направлены на этот ID. Соответствие Bearer/header и способы задания env описаны в [официальном руководстве gateway](https://code.claude.com/docs/en/llm-gateway-connect).
+
+Реальный Claude Code 2.1.306 с такой временной конфигурацией завершился exit=0/subtype=success, создал result.txt с точным ожидаемым содержимым и вернул CLAUDE_LOCAL_API_OK. Отдельный запуск с stream-json подтвердил настоящий tool_use Read и возврат случайного содержимого probe.txt, отсутствовавшего в промпте. Следовательно, для проверенного сервиса работают как запрос модели, так и инструментальный цикл Claude Code.
+
+Проверка использует клиент Claude Code с моделью Qwen; она не превращает локальную модель в модель Anthropic Claude. Официально Anthropic не поддерживает маршрутизацию клиента к не-Claude моделям ([оговорка gateway](https://code.claude.com/docs/en/llm-gateway)); результаты выше фиксируют фактическую совместимость текущих версий, а не гарантию всех возможностей. Полный ACP/Clear context цикл в этом probe не повторялся.
+
+Постоянные настройки не менялись: CLAUDE_CONFIG_DIR и settings-файл с mode 0600 находились только в отдельных временных каталогах, нативное сохранение сессии отключено. Ключ извлекался на VM и не выводился/не передавался в argv. После обоих запусков собственных процессов не осталось; временные конфиги, файлы и каталоги удалены. Контрольные суммы постоянных settings совпали до/после.
+
+
+Полный ACP/Clear context с этим временным подключением выполнен отдельно: повторный четырёхфазный сценарий прошёл, включая забывание старого токена и resume новой сессии. Первая попытка зафиксировала неповторившийся отказ session/new до сохранения ID; причина не установлена. Обе попытки — [результаты](claude-qwen-context-live-results.json), описание — [agent-integration-tests.md](agent-integration-tests.md#полный-clear-context-claude-code-через-api-qwen--2026-11-14). Постоянная настройка Claude этим тестом не устанавливается.

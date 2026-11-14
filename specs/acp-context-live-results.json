@@ -1,0 +1,504 @@
+{
+  "date": "2026-11-14",
+  "remote_host": "192.168.1.240:2222",
+  "settings_source": "existing remote user settings and authentication; no provider/model overrides",
+  "wait_background_tasks": true,
+  "quiet_timeout": 60,
+  "results": [
+    {
+      "agent": "claude",
+      "command": "/home/user/.local/bin/acp-wrapper /home/user/.local/bin/claude --dangerously-skip-permissions",
+      "phases": [
+        {
+          "phase": "initial",
+          "seconds": 4.17,
+          "exit_code": 1,
+          "status": "WAIT",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "session/close"
+          ],
+          "session_id": "3c586475-e952-4176-a103-6320a95f467b",
+          "model_ids": [
+            "default"
+          ],
+          "background_snapshots": 0,
+          "stop_reason": null,
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "failure_category": "authentication_required",
+          "error_label": "Authentication required"
+        },
+        {
+          "phase": "new_after_auth_failure_clear",
+          "seconds": 4.25,
+          "exit_code": 1,
+          "status": "WAIT",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "session/close"
+          ],
+          "session_id": "5db993ba-e6f4-466d-95a7-301334da7a4b",
+          "model_ids": [
+            "default"
+          ],
+          "background_snapshots": 0,
+          "stop_reason": null,
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "failure_category": "authentication_required",
+          "error_label": "Authentication required"
+        }
+      ],
+      "sessions": [
+        "3c586475-e952-4176-a103-6320a95f467b",
+        "5db993ba-e6f4-466d-95a7-301334da7a4b"
+      ],
+      "status": "partial",
+      "reason": "authentication_required",
+      "new_session_requested": true,
+      "new_session_created": true,
+      "reset_idempotent": true,
+      "reset_http_passed": true,
+      "model_memory_check": "not_run_without_existing_authentication",
+      "residual_processes": 0,
+      "seconds": 8.54
+    },
+    {
+      "agent": "codex",
+      "command": "/home/user/.local/bin/acp-wrapper /usr/bin/codex --yolo",
+      "phases": [
+        {
+          "phase": "initial",
+          "seconds": 85.67,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt"
+          ],
+          "session_id": "01a1daa6-eda1-77a0-8d73-730d55a48240",
+          "model_ids": [
+            "gpt-6.1-sol",
+            "gpt-6.1-sol[low]"
+          ],
+          "background_snapshots": 59,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "resume_before_clear",
+          "seconds": 69.55,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/load",
+            "session/prompt"
+          ],
+          "session_id": "01a1daa6-eda1-77a0-8d73-730d55a48240",
+          "model_ids": [
+            "gpt-6.1-sol",
+            "gpt-6.1-sol[low]"
+          ],
+          "background_snapshots": 55,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "new_after_clear",
+          "seconds": 86.95,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt"
+          ],
+          "session_id": "01a1daa9-4b7b-79d1-a984-76d36396d500",
+          "model_ids": [
+            "gpt-6.1-sol",
+            "gpt-6.1-sol[low]"
+          ],
+          "background_snapshots": 59,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "resume_after_clear",
+          "seconds": 71.08,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/load",
+            "session/prompt"
+          ],
+          "session_id": "01a1daa9-4b7b-79d1-a984-76d36396d500",
+          "model_ids": [
+            "gpt-6.1-sol",
+            "gpt-6.1-sol[low]"
+          ],
+          "background_snapshots": 56,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        }
+      ],
+      "sessions": [
+        "01a1daa6-eda1-77a0-8d73-730d55a48240",
+        "01a1daa9-4b7b-79d1-a984-76d36396d500"
+      ],
+      "status": "passed",
+      "old_memory_resumed": true,
+      "new_session_created": true,
+      "old_memory_absent": true,
+      "artifact_preserved": true,
+      "new_session_resumed": true,
+      "reset_idempotent": true,
+      "reset_survives_startup": true,
+      "residual_processes": 0,
+      "seconds": 313.57
+    },
+    {
+      "agent": "qwen",
+      "command": "qwen --acp --yolo --output-format stream-json --model qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "phases": [
+        {
+          "phase": "initial",
+          "seconds": 14.25,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "qwen/status/session/tasks",
+            "qwen/control/session/close"
+          ],
+          "session_id": "1c525ff0-a467-4716-9767-6d0abb47772c",
+          "model_ids": [
+            "qwen3.8-flash-next-unsloth-ud-q4_k_xl(openai)"
+          ],
+          "background_snapshots": 0,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "resume_before_clear",
+          "seconds": 5.49,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/load",
+            "session/prompt",
+            "qwen/status/session/tasks",
+            "qwen/control/session/close"
+          ],
+          "session_id": "1c525ff0-a467-4716-9767-6d0abb47772c",
+          "model_ids": [
+            "qwen3.8-flash-next-unsloth-ud-q4_k_xl(openai)"
+          ],
+          "background_snapshots": 0,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "new_after_clear",
+          "seconds": 10.55,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "qwen/status/session/tasks",
+            "qwen/control/session/close"
+          ],
+          "session_id": "b2824ad3-5a7c-4a12-baf0-df40526b8d3f",
+          "model_ids": [
+            "qwen3.8-flash-next-unsloth-ud-q4_k_xl(openai)"
+          ],
+          "background_snapshots": 0,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        },
+        {
+          "phase": "resume_after_clear",
+          "seconds": 4.67,
+          "exit_code": 0,
+          "status": "REVIEW",
+          "methods": [
+            "initialize",
+            "session/load",
+            "session/prompt",
+            "qwen/status/session/tasks",
+            "qwen/control/session/close"
+          ],
+          "session_id": "b2824ad3-5a7c-4a12-baf0-df40526b8d3f",
+          "model_ids": [
+            "qwen3.8-flash-next-unsloth-ud-q4_k_xl(openai)"
+          ],
+          "background_snapshots": 0,
+          "stop_reason": "end_turn",
+          "active_reset_rejected": true,
+          "history_preserved": true,
+          "remaining_processes": 0
+        }
+      ],
+      "sessions": [
+        "1c525ff0-a467-4716-9767-6d0abb47772c",
+        "b2824ad3-5a7c-4a12-baf0-df40526b8d3f"
+      ],
+      "status": "passed",
+      "old_memory_resumed": true,
+      "new_session_created": true,
+      "old_memory_absent": true,
+      "artifact_preserved": true,
+      "new_session_resumed": true,
+      "reset_idempotent": true,
+      "reset_survives_startup": true,
+      "residual_processes": 0,
+      "seconds": 35.25
+    }
+  ],
+  "remote_settings_unchanged": true,
+  "cleanup": {
+    "removed_cache_files": 11,
+    "removed_codex_threads": 2,
+    "remaining_processes": 0,
+    "remote_root_removed": true
+  },
+  "runtime_versions": {
+    "claude_code": "2.1.306",
+    "codex_cli": "0.167.0",
+    "qwen_code": "0.27.3",
+    "acp_wrapper": "0.96.0",
+    "acp_wrapper_source": "ac8dc81685d96b7ad14cc6be1fdfa558ea332cb0"
+  },
+  "scope": "Clear context integration only; historical ACP-01..26/INT-01..07 matrix was not rerun",
+  "summary": {
+    "passed": 2,
+    "partial": 1,
+    "failed": 0,
+    "successful_model_phases": 8,
+    "claude_authentication_failures_in_final_probe": 2
+  },
+  "supplemental_claude_cleanup": {
+    "removed_cache_files": 2,
+    "removed_codex_threads": 0,
+    "remaining_processes": 0,
+    "remote_root_removed": true
+  },
+  "supplemental_claude_settings_unchanged": true,
+  "attempt_history": [
+    {
+      "purpose": "preflight; OUT trace parser was corrected before final verification",
+      "results": [
+        {
+          "agent": "claude",
+          "command": "/home/user/.local/bin/acp-wrapper /home/user/.local/bin/claude --dangerously-skip-permissions",
+          "phases": [
+            {
+              "phase": "initial",
+              "seconds": 3.82,
+              "exit_code": 1,
+              "status": "WAIT",
+              "methods": [],
+              "session_id": "57f62aeb-4bf5-40a4-b8ac-d38a3cfc8849",
+              "stop_reason": null,
+              "active_reset_rejected": true,
+              "history_preserved": true
+            }
+          ],
+          "sessions": [
+            "57f62aeb-4bf5-40a4-b8ac-d38a3cfc8849"
+          ],
+          "status": "blocked",
+          "reason": "authentication_required",
+          "uncertain": false,
+          "residual_processes": 0,
+          "seconds": 3.91
+        },
+        {
+          "agent": "codex",
+          "command": "/home/user/.local/bin/acp-wrapper /usr/bin/codex --yolo",
+          "phases": [
+            {
+              "phase": "initial",
+              "seconds": 87.64,
+              "exit_code": 0,
+              "status": "REVIEW",
+              "methods": [],
+              "session_id": "01a1daa3-9ed8-7703-b04a-1a2fe29be4fc",
+              "stop_reason": "end_turn",
+              "active_reset_rejected": true,
+              "history_preserved": true
+            }
+          ],
+          "sessions": [
+            "01a1daa3-9ed8-7703-b04a-1a2fe29be4fc"
+          ],
+          "status": "failed",
+          "reason": "AssertionError",
+          "residual_processes": 0,
+          "seconds": 87.71
+        },
+        {
+          "agent": "qwen",
+          "command": "qwen --acp --yolo --output-format stream-json --model qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+          "phases": [
+            {
+              "phase": "initial",
+              "seconds": 18.02,
+              "exit_code": 0,
+              "status": "REVIEW",
+              "methods": [],
+              "session_id": "2fd2829c-9a6a-403f-9578-d1c85263193b",
+              "stop_reason": "end_turn",
+              "active_reset_rejected": true,
+              "history_preserved": true
+            }
+          ],
+          "sessions": [
+            "2fd2829c-9a6a-403f-9578-d1c85263193b"
+          ],
+          "status": "failed",
+          "reason": "AssertionError",
+          "residual_processes": 0,
+          "seconds": 18.09
+        }
+      ],
+      "cleanup": {
+        "removed_cache_files": 7,
+        "remaining_processes": 0,
+        "remote_root_removed": true
+      },
+      "additional_removed_codex_threads": 1
+    },
+    {
+      "purpose": "initial authentication probe in main run",
+      "result": {
+        "agent": "claude",
+        "command": "/home/user/.local/bin/acp-wrapper /home/user/.local/bin/claude --dangerously-skip-permissions",
+        "phases": [
+          {
+            "phase": "initial",
+            "seconds": 3.87,
+            "exit_code": 1,
+            "status": "WAIT",
+            "methods": [
+              "initialize",
+              "session/new",
+              "session/prompt",
+              "session/close"
+            ],
+            "session_id": "1c0fd3d8-b1e5-4caf-9a94-348f70b93425",
+            "model_ids": [
+              "default"
+            ],
+            "background_snapshots": 0,
+            "stop_reason": null,
+            "active_reset_rejected": true,
+            "history_preserved": true
+          }
+        ],
+        "sessions": [
+          "1c0fd3d8-b1e5-4caf-9a94-348f70b93425"
+        ],
+        "status": "blocked",
+        "reason": "authentication_required",
+        "uncertain": false,
+        "residual_processes": 0,
+        "seconds": 3.98
+      }
+    },
+    {
+      "purpose": "diagnostic Claude reset probe; final probe above supersedes its overly strict sessionId assertion",
+      "results": [
+        {
+          "agent": "claude",
+          "command": "/home/user/.local/bin/acp-wrapper /home/user/.local/bin/claude --dangerously-skip-permissions",
+          "phases": [
+            {
+              "phase": "initial",
+              "seconds": 4.05,
+              "exit_code": 1,
+              "status": "WAIT",
+              "methods": [
+                "initialize",
+                "session/new",
+                "session/prompt",
+                "session/close"
+              ],
+              "session_id": "677bdbe5-e16e-4e64-af85-79e75ad17014",
+              "model_ids": [
+                "default"
+              ],
+              "background_snapshots": 0,
+              "stop_reason": null,
+              "active_reset_rejected": true,
+              "history_preserved": true
+            },
+            {
+              "phase": "new_after_auth_failure_clear",
+              "seconds": 4.91,
+              "exit_code": 1,
+              "status": "WAIT",
+              "methods": [
+                "initialize",
+                "session/new"
+              ],
+              "session_id": null,
+              "model_ids": [
+                "default"
+              ],
+              "background_snapshots": 0,
+              "stop_reason": null,
+              "active_reset_rejected": true,
+              "history_preserved": true
+            }
+          ],
+          "sessions": [
+            "677bdbe5-e16e-4e64-af85-79e75ad17014"
+          ],
+          "status": "failed",
+          "reason": "AssertionError",
+          "residual_processes": 0,
+          "seconds": 9.07
+        }
+      ],
+      "cleanup": {
+        "removed_cache_files": 1,
+        "removed_codex_threads": 0,
+        "remaining_processes": 0,
+        "remote_root_removed": true
+      }
+    }
+  ],
+  "settings_checks_unchanged": true,
+  "independent_cleanup_audit": {
+    "remaining_remote_test_roots": 0,
+    "remaining_test_processes": 0,
+    "remaining_codex_test_threads": 0
+  }
+}

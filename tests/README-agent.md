@@ -63,3 +63,28 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. dev-venv/bin/python tests/live_acp_matrix
 подтверждённое ограничение, а не полную гарантию выполнения/очистки.
 Текущая матрица и история попыток — specs/agent-integration-tests.md и
 specs/routerai-live-results.json.
+
+
+### Живой Clear context с текущими настройками VM
+
+`tests/live_task_context.py` выполняет отдельную интеграцию сброса контекста для Claude, Codex и Qwen. Используются установленный `~/.local/bin/acp-wrapper`, нативные CLI и существующие настройки/авторизация SSH-пользователя. По умолчанию драйвер не задаёт новый API key, provider, model, CODEX_HOME или CLAUDE_CONFIG_DIR; Qwen запускается с текущим `agent.shell`. Claude/Codex получают только стандартные флаги автономных разрешений. Штатные флаги ожидания фоновой работы и quiet timeout берутся из снимка настроек оркестратора.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.:tests dev-venv/bin/python tests/live_task_context.py \
+  --report specs/acp-context-live-results.json
+```
+
+Матрица: первая сессия запоминает случайный токен только в беседе и создаёт файл; resume воспроизводит токен; настоящий HTTP clear-context сохраняет историю/даты и идемпотентно задаёт границу; новая сессия читает прежний файл, не знает старый токен и запоминает новый; следующее resume воспроизводит новый токен. Проверяются реальные OUT NDJSON, sessionId, состояние REVIEW, запрет сброса во время IN PROGRESS и отсутствие собственных оставшихся процессов. Если агент не авторизован, отдельно проверяются сброс после WAIT и запрос session/new; новый ID проверяется, когда агент разрешает создание сессии без входа. Проверка памяти отмечается как невыполненная, результат partial. Доступны --agents и --phase-deadline (внешний watchdog отдельной фазы; не меняет настройки VM).
+
+Рабочая БД и consumer не используются: каждый агент получает временную SQLite, а на VM создаётся отдельный cwd. Init и system append prompt отключены только в тестовом снимке. Сырые логи находятся во временном каталоге, а отчёт содержит только результаты и идентификаторы сессий. После прогона удаляются собственные процессы, каталоги и новые файлы нативных сессий; записи Codex удаляются по точным ID тестовых threads. Контрольные суммы файлов настроек сравниваются до/после. Секреты и рабочие сессии сохраняются.
+
+
+Для Claude Code с текущим API Qwen есть отдельный явно выбираемый режим:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.:tests dev-venv/bin/python tests/live_task_context.py \
+  --agents claude --claude-qwen-provider \
+  --report specs/claude-qwen-context-live-results.json
+```
+
+Ключ, endpoint и модель берутся непосредственно из текущих `.qwen/settings.json` на VM. Credential не возвращается в локальный процесс, stdout или argv; временный settings-файл создаётся с mode 0600 внутри test-root. Для Claude выставляются совместимые ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL и alias-модели. Один временный CLAUDE_CONFIG_DIR сохраняется на все четыре фазы; сохранение native session обязательно для проверки session/load. После завершения он удаляется вместе с остальными артефактами, постоянные настройки не меняются. Это клиент Claude Code с моделью Qwen через тот же провайдер; прежняя проверка без авторизации остаётся отдельным историческим результатом.

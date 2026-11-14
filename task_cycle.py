@@ -44,7 +44,7 @@ class TaskCycle:
                 raise InitError('Init script error: saved task directory does not match remote configuration')
             return True
         # Existing installations already have ACP sessions; preserve their resume.
-        return bool(self.run.get('session_id'))
+        return bool(self.run.get('session_id') or self.run.get('has_session_context'))
 
     def pid(self, pid):
         with closing(board_store.connect()) as db, db:

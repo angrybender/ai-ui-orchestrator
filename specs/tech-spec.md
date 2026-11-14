@@ -129,3 +129,20 @@
 `agent_runs.message_turn` и `task_chat_messages.message_turn` — INTEGER NOT NULL DEFAULT 0. Уникальность сообщения определяется `(task_pk, run_id, role, message_turn)`. Перед дополнительным проверочным `session/prompt` транспорт вызывает `TaskCycle.next_message()` с проверкой активного владельца; обычные сбросы потокового буфера не повышают номер. `agent_store.message()` обновляет только текущий ход, `finish()` добавляет обычную ошибку к текущему ходу. Системные ошибки сохраняют отдельную роль. Формат GET chat не меняется: порядок определяется ID сообщения, все ответы содержат исходный run_id.
 
 Миграция чата выполняется в транзакции с блокировкой записи, сохраняет ID/текст/роль/run_id/существующие даты, переносит прежние записи в ход 0 и сохраняет индекс порядка и внешний ключ. Повторная инициализация не меняет историю. Отдельный счётчик в agent_runs также добавляется старой БД с default 0. Требования интерфейса — [task-chat.md](task-chat.md); проверки — tests/test_agent_chat_turns.py, существующие AIR/wrapper-регрессии и tests/agent_chat_turns.js.
+
+
+### Граница сброса ACP-сессии
+
+`task_session.py` отдельно реализует доступность и идемпотентный сброс контекста; `controllers/board.py` публикует POST clear-context. `board_tasks.acp_reset_after_run` — INTEGER NOT NULL DEFAULT 0, приватная колонка с миграцией существующих БД. Сброс под блокировкой BEGIN IMMEDIATE фиксирует максимальный rowid запусков задачи и добавляет системное сообщение. `agent_store.claim` выбирает последний session_id по rowid и исключает ID до/на границе. Признак `has_session_context` сохраняет legacy reuse и пропуск Init без возобновления старой беседы. Исторические session_id не очищаются; ошибка до создания новой сессии сохраняет границу.
+
+GET chat дополнительно возвращает `can_clear_context`; обычный `task-chat.js` без import/сборки показывает кнопку в обеих формах и использует общие Spinner/Toast. Обработчик HTTP не запускает SSH/ACP. Детальные правила — [agent.md](agent.md#ручной-сброс-acp-контекста) и [task-chat.md](task-chat.md#сброс-контекста-агента). Постоянные проверки — `tests/test_task_session.py` и `tests/task_context_ui.js`.
+
+
+Живая интеграция Clear context: `tests/live_current_environment.py` использует текущие удалённые настройки/авторизацию без изолированного provider-конфига; `tests/live_task_context.py` выполняет настоящий `agent_worker.execute`, HTTP clear-context, проверяет память и файлы, сохраняет только безопасный JSON-отчёт и очищает собственные ресурсы. Снимок прикладных настроек не записывается в user JSON. Вердикт VM — Codex/Qwen passed, Claude partial из-за Authentication required; подробности — [agent-integration-tests.md](agent-integration-tests.md).
+
+При пропуске Init после сброса legacy-сессии `agent_remote` получает `has_session_context` из `TaskCycle.run`, поскольку worker передаёт публичную задачу отдельно от снимка захвата. Исправление подтверждено регрессией с реальной формой аргумента worker; до исправления она падала с Init reran after clear.
+
+
+Для явной проверки Claude Code через существующий API Qwen драйвер tests/live_task_context.py поддерживает --claude-qwen-provider. tests/live_current_environment.py извлекает credential/model/endpoint непосредственно на VM, создаёт приватный settings-файл и сохраняет один временный CLAUDE_CONFIG_DIR на все четыре фазы. Launcher экспортирует env только для тестового Claude; native session persistence не отключается. Без флага поведение прежнее. Безопасная диагностика дополнительно редактирует provider credential на VM, не передавая его локальному драйверу.
+
+Сценарий прошёл на повторе; в первой попытке session/new после сброса отказал до сохранения ID, причина не установлена. Обе попытки сохранены в specs/claude-qwen-context-live-results.json. Код приложения/UI не менялись; прошли 15 offline-регрессий reset и Playwright двух форм. Подробности — [agent-integration-tests.md](agent-integration-tests.md).

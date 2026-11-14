@@ -348,7 +348,7 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
         cwd = posixpath.join(base, task["task_id"])
         if posixpath.dirname(posixpath.normpath(cwd)) != base:
             raise ValueError
-        resume = cycle.reuse(cwd) if cycle else bool(task.get("session_id"))
+        resume = cycle.reuse(cwd) if cycle else bool(task.get("session_id") or task.get("has_session_context"))
         context_dir = prepare_directory(sftp, cwd, task['task_id'], resume)
         sync_context(sftp, context_dir, text, names, resume,
                      cycle.check if cycle else lambda: None)
@@ -357,7 +357,8 @@ def run_remote(task: dict, attachments: list[tuple[Path, str]], config: dict,
             cycle.check()
         enabled = bool((config.get('tasks.init_script_path') or '').strip() or (config.get('tasks.init_script_text') or '').strip())
         initialized = cycle.run.get('init_succeeded') if cycle else task.get('init_succeeded')
-        if enabled and not initialized and not task.get('session_id'):
+        saved_context = cycle.run.get('has_session_context') if cycle else task.get('has_session_context')
+        if enabled and not initialized and not task.get('session_id') and not saved_context:
             if cycle:
                 cycle.phase('Init')
             run_init(transport, sftp, cwd, config, sanitize=diagnostics.safe,
