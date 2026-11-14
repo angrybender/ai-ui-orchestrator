@@ -67,6 +67,10 @@ def test_fork_drains_and_closes_without_signals(fork_harness, mode):
     assert board_store.get_task('CANCEL-1')['status'] == 'REVIEW', saved_run()['error']
     assert saved_run()['agent_stop_confirmed'] == 1
     assert saved_run()['agent_uncertain'] == 0
+    messages = board_store.get_chat('CANCEL-1')['messages']
+    assert [m['text'] for m in messages] == (['started'] if mode == 'no-jobs' else
+                                           ['started', 'verified final answer'])
+    assert len({m['run_id'] for m in messages}) == 1
     if mode == 'stale-close':
         assert (h.cwd/'stale.refused').exists()
     assert all('kill -TERM' not in c.process.args for c in h.ssh.channels[1:])
@@ -82,6 +86,9 @@ def test_fork_allows_more_than_three_result_generations(fork_harness, monkeypatc
     assert not h.worker.is_alive()
     assert (h.cwd/'verify.7').exists()
     assert board_store.get_task('CANCEL-1')['status'] == 'REVIEW', saved_run()['error']
+
+    messages = board_store.get_chat('CANCEL-1')['messages']
+    assert [m['text'] for m in messages] == ['started'] + ['verified final answer'] * 6
 
 
 def test_fork_does_not_apply_the_legacy_drain_deadline(fork_harness, monkeypatch):

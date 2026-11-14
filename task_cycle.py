@@ -61,6 +61,18 @@ class TaskCycle:
             db.execute('UPDATE agent_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?) WHERE id = ?',
                        (time.time(), self.run['id']))
 
+    def next_message(self):
+        """Reserve a response for an additional prompt without a blank chat row."""
+        with closing(board_store.connect()) as db, db:
+            changed = db.execute(
+                "UPDATE agent_runs SET message_turn = message_turn + 1 "
+                "WHERE id = ? AND state IN ('PREPARING', 'RUNNING') AND EXISTS "
+                "(SELECT 1 FROM board_tasks WHERE id = agent_runs.task_pk "
+                "AND active_run_id = agent_runs.id AND status = 'IN PROGRESS')",
+                (self.run['id'],))
+            if changed.rowcount != 1:
+                raise ValueError('Remote agent cancelled')
+
     def agent_stopped(self, confirmed):
         with closing(board_store.connect()) as db, db:
             db.execute('BEGIN IMMEDIATE')

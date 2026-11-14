@@ -71,3 +71,35 @@ def test_stream_headers_and_cancellation():
             await anext(response.body_iterator)
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize('deleted', [False, True])
+def test_stream_reports_recovery_without_visible_task_changes(monkeypatch, deleted):
+    monkeypatch.setattr(board_events, 'POLL_INTERVAL', 0)
+    monkeypatch.setattr(board_events, 'HEARTBEAT_POLLS', 1)
+    board_store.init_database()
+    agent_store.init_database()
+    board_store.create_task('REC-1', 'Blocked task', 'Description', [])
+    board_store.move_task('REC-1', 'OPEN', 0)
+    run = agent_store.claim(60)
+    agent_store.finish(run['id'], 'Remote stop unconfirmed.', agent_uncertain=True)
+    board_store.move_task('REC-1', 'ARCHIVE', 0, force=True)
+    if deleted:
+        with board_store.connect() as connection:
+            connection.execute("DELETE FROM board_tasks WHERE task_id = 'REC-1'")
+
+    async def check():
+        stream = board_events.task_events(Request())
+        try:
+            data = json.loads((await anext(stream)).split('data: ', 1)[1])
+            assert data == {'tasks': [], 'recovery_runs': [
+                {'run_id': run['id'], 'task_id': None if deleted else 'REC-1'}
+            ]}
+            assert await anext(stream) == ': keepalive\n\n'
+            agent_store.confirm_remote_stop(run['id'])
+            data = json.loads((await anext(stream)).split('data: ', 1)[1])
+            assert data == {'tasks': [], 'recovery_runs': []}
+        finally:
+            await stream.aclose()
+
+    asyncio.run(check())

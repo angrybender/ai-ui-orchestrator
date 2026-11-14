@@ -88,7 +88,7 @@ try:
                 update('tool_call_update',toolCallId='stop',status='failed' if mode=='server-stop-failed' else 'completed')
                 if mode=='server-stop-after':update('async_task_state_update',asyncTaskId=target,state='stopped')
             if mode=='second' and count==2:background('second','release.second')
-            text('verified final answer')
+            text('verified ');text('final answer')
         if mode=='silent':update('usage_update',used=1,size=100)
         if mode=='disconnect':sys.exit(0)
         result={'stopReason':'refusal' if mode in ('refusal','failed-refusal') and count>1 else 'end_turn'}
@@ -151,6 +151,13 @@ def test_waits_for_results_rechecks_new_work_and_quiet_period(air_harness, mode)
     assert all('kill -TERM' not in c.process.args for c in h.ssh.channels[1:])
     requests=(h.cwd/'requests.jsonl').read_text()
     assert 'qwen/status' not in requests and 'qwen/control' not in requests
+    messages = board_store.get_chat('CANCEL-1')['messages']
+    assert messages[0]['text'] == 'started'
+    assert messages[1]['text'] == ('late automatic summary' if mode == 'late' else 'verified final answer')
+    assert len({message['run_id'] for message in messages}) == 1
+    if mode == 'second':
+        assert [message['text'] for message in messages] == [
+            'started', 'verified final answer', 'verified final answer']
 
 
 @pytest.mark.parametrize('mode', ['failed-refusal','provider-error','refusal','disconnect','stopped','close-race','postclose-race'])

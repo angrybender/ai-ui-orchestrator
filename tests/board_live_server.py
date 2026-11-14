@@ -26,8 +26,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--wait-queue', action='store_true', help='Use local test executors for agent/run.')
     parser.add_argument("--directory", type=Path)
-    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "agent-uncertain", "message", "context-conflict"))
+    parser.add_argument("--operation", choices=("claim", "success", "failure", "init", "agent", "init-failure", "agent-uncertain", "message", "next-message", "context-conflict"))
     parser.add_argument("--run-id")
+    parser.add_argument('--message-text', default='Agent response after retry')
     args = parser.parse_args()
     if args.wait_queue:
         from wait_queue_worker import configure_launcher, stop_test_workers
@@ -53,8 +54,12 @@ def main() -> None:
             agent_store.finish(args.run_id, 'Init script error: <img src=x onerror=alert(1)>', init_error=True)
             result = {'finished': args.run_id}
         elif args.operation == 'message':
-            agent_store.message(args.run_id, 'Agent response after retry')
+            agent_store.message(args.run_id, args.message_text)
             result = {'message': args.run_id}
+        elif args.operation == 'next-message':
+            from task_cycle import TaskCycle
+            TaskCycle({'id': args.run_id}, {}).next_message()
+            result = {'next_message': args.run_id}
         elif args.operation == 'context-conflict':
             agent_store.finish(args.run_id, 'Task directory requirements-INIT-1 already exists.')
             result = {'finished': args.run_id}

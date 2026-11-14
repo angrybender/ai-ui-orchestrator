@@ -5,6 +5,7 @@ import json
 
 from starlette.concurrency import run_in_threadpool
 
+import agent_store
 import board_store
 
 POLL_INTERVAL = 0.5
@@ -16,7 +17,8 @@ async def task_events(request):
     idle_polls = 0
     while not await request.is_disconnected():
         tasks = await run_in_threadpool(board_store.list_tasks)
-        payload = json.dumps({"tasks": tasks}, ensure_ascii=False)
+        recovery_runs = await run_in_threadpool(agent_store.recovery_candidates)
+        payload = json.dumps({"tasks": tasks, "recovery_runs": recovery_runs}, ensure_ascii=False)
         if payload != previous:
             yield f"event: board\ndata: {payload}\n\n"
             previous = payload

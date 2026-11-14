@@ -23,6 +23,16 @@ const fixture = path.join(__dirname, 'board_live_server.py');
     const page = await browser.newPage({ viewport: { width: 1459, height: 1000 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript(() => {
+      window.recoveryNotices = [];
+      document.addEventListener('DOMContentLoaded', () => {
+        const showToast = window.showToast;
+        window.showToast = (message, options) => {
+          if (message.includes('Verify the remote agent has stopped')) window.recoveryNotices.push(message);
+          return showToast(message, options);
+        };
+      });
+    });
     await page.goto(info.url);
     const button = page.locator('#agent-recovery-button');
     await expect(button).toHaveText('Agent Recovery');
@@ -40,6 +50,28 @@ const fixture = path.join(__dirname, 'board_live_server.py');
     const run = operation('claim');
     operation('agent', run.id);
     operation('agent-uncertain', run.id);
+    const blockedMessage = 'Agent queue blocked by unconfirmed remote stop: REC-1. Verify the remote agent has stopped, then use Agent Recovery on Board.';
+    const notice = page.locator('.toast.is-error[role=alert]').filter({ hasText: blockedMessage });
+    await expect(notice).toHaveText(blockedMessage);
+    await expect.poll(() => page.evaluate(() => window.recoveryNotices.length)).toBe(1);
+    if (process.env.RECOVERY_SCREENSHOTS) {
+      await expect(notice).toHaveCSS('opacity', '1');
+      await page.screenshot({ path: process.env.RECOVERY_SCREENSHOTS + '-blocked-desktop.png' });
+      await page.setViewportSize({ width: 320, height: 800 });
+      const box = await notice.boundingBox();
+      assert(box.x >= 0 && box.x + box.width <= 320);
+      assert(box.y >= 0 && box.y + box.height <= 800);
+      await page.screenshot({ path: process.env.RECOVERY_SCREENSHOTS + '-blocked-mobile.png' });
+      await page.setViewportSize({ width: 1459, height: 1000 });
+    }
+    // A fresh snapshot/reconnection must not repeat the same queue warning.
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await page.request.put(info.url + '/api/board/tasks/REC-1', { data: { title: 'Still blocked', description: 'Recovery check', status: 'WAIT' } });
+    await expect.poll(() => page.locator('.task-card[data-task-id="REC-1"] .task-title').textContent()).toBe('Still blocked');
+    assert.equal(await page.evaluate(() => window.recoveryNotices.length), 1);
+    await page.reload();
+    await expect(notice).toHaveText(blockedMessage);
+    assert.equal(await page.evaluate(() => window.recoveryNotices.length), 1);
     page.once('dialog', dialog => dialog.dismiss());
     await button.click();
     await expect(button).toBeEnabled();
@@ -84,7 +116,7 @@ const fixture = path.join(__dirname, 'board_live_server.py');
     await page.goto(info.url + '/tasks/REC-1');
     await expect(page.locator('#agent-recovery-button')).toHaveCount(0);
     assert.deepEqual(errors, []);
-    console.log('PASS: recovery placement, empty queue, dismiss/confirm, real recovery API, duplicate guard, Spinner, errors, 320px layout and Board-only visibility');
+    console.log('PASS: live/reloaded blocked queue Toast, no duplicate on updates/reconnect, recovery placement, empty queue, dismiss/confirm, real recovery API, duplicate guard, Spinner, errors, 320px layout and Board-only visibility');
   } finally {
     if (browser) await browser.close();
     const exited = new Promise(resolve => server.once('exit', resolve));
