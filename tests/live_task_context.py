@@ -1,6 +1,6 @@
 """Explicit SSH/model integration for Clear context with existing remote providers.
 
-PYTHONPATH=.:tests dev-venv/bin/python tests/live_task_context.py --report specs/acp-context-live-results.json
+PYTHONPATH=.:tests dev-venv/bin/python tests/live_task_context.py --report /tmp/acp-context-live-results.json
 """
 import argparse
 from contextlib import closing

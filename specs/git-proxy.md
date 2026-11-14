@@ -51,4 +51,4 @@
 
 Невалидный GET/POST endpoint или repository path возвращает 400 `not allowed`; прочие методы отклоняются маршрутизацией с 405. Невалидная конфигурация — 503 `Git proxy is not configured`. Ошибка транспорта до начала ответа — 502 `Git upstream unavailable`, общий timeout — 504. После начала ответа исключение прерывает поток.
 
-В SSH-режиме сервер запускает `git-upload-pack` или `git-receive-pack` с экранированным путём репозитория. Для GET формируется Smart HTTP advertisement, для POST предварительный advertisement SSH-сервиса вычитывается перед передачей тела. Используются настроенные `ssh_username` и ключ; username из remote_host не заменяет отдельную настройку. Полная совместимость перечисленных Git-команд с реальным upstream не подтверждается unit-тестами.
+В SSH-режиме сервер запускает `git-upload-pack` или `git-receive-pack` с экранированным путём репозитория. Для GET формируется Smart HTTP advertisement, для POST предварительный advertisement SSH-сервиса вычитывается перед передачей тела. Используются настроенные `ssh_username` и ключ; username из remote_host не заменяет отдельную настройку.

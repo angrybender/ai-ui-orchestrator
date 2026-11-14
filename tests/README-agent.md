@@ -61,8 +61,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. dev-venv/bin/python tests/live_acp_matrix
 с собственными процессами и cwd. При SIGTERM запускается та же очистка.
 Отчёт хранит endpoint, test-root и результаты без ключа. `partial` означает
 подтверждённое ограничение, а не полную гарантию выполнения/очистки.
-Текущая матрица и история попыток — specs/agent-integration-tests.md и
-specs/routerai-live-results.json.
+Сценарии реализованы в `tests/live_acp_matrix.py`, `tests/live_acp_cases.py` и `tests/live_acp_integration.py`.
 
 
 ### Живой Clear context с текущими настройками VM
@@ -71,7 +70,7 @@ specs/routerai-live-results.json.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.:tests dev-venv/bin/python tests/live_task_context.py \
-  --report specs/acp-context-live-results.json
+  --report /tmp/acp-context-live-results.json
 ```
 
 Матрица: первая сессия запоминает случайный токен только в беседе и создаёт файл; resume воспроизводит токен; настоящий HTTP clear-context сохраняет историю/даты и идемпотентно задаёт границу; новая сессия читает прежний файл, не знает старый токен и запоминает новый; следующее resume воспроизводит новый токен. Проверяются реальные OUT NDJSON, sessionId, состояние REVIEW, запрет сброса во время IN PROGRESS и отсутствие собственных оставшихся процессов. Если агент не авторизован, отдельно проверяются сброс после WAIT и запрос session/new; новый ID проверяется, когда агент разрешает создание сессии без входа. Проверка памяти отмечается как невыполненная, результат partial. Доступны --agents и --phase-deadline (внешний watchdog отдельной фазы; не меняет настройки VM).
@@ -84,7 +83,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.:tests dev-venv/bin/python tests/live_task
 ```sh
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=.:tests dev-venv/bin/python tests/live_task_context.py \
   --agents claude --claude-qwen-provider \
-  --report specs/claude-qwen-context-live-results.json
+  --report /tmp/claude-qwen-context-live-results.json
 ```
 
-Ключ, endpoint и модель берутся непосредственно из текущих `.qwen/settings.json` на VM. Credential не возвращается в локальный процесс, stdout или argv; временный settings-файл создаётся с mode 0600 внутри test-root. Для Claude выставляются совместимые ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL и alias-модели. Один временный CLAUDE_CONFIG_DIR сохраняется на все четыре фазы; сохранение native session обязательно для проверки session/load. После завершения он удаляется вместе с остальными артефактами, постоянные настройки не меняются. Это клиент Claude Code с моделью Qwen через тот же провайдер; прежняя проверка без авторизации остаётся отдельным историческим результатом.
+Ключ, endpoint и модель берутся непосредственно из текущих `.qwen/settings.json` на VM. Credential не возвращается в локальный процесс, stdout или argv; временный settings-файл создаётся с mode 0600 внутри test-root. Для Claude выставляются совместимые ANTHROPIC_BASE_URL/AUTH_TOKEN/MODEL и alias-модели. Один временный CLAUDE_CONFIG_DIR сохраняется на все четыре фазы; сохранение native session обязательно для проверки session/load. После завершения он удаляется вместе с остальными артефактами, постоянные настройки не меняются. Это клиент Claude Code с моделью Qwen через тот же провайдер.

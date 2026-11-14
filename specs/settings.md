@@ -34,7 +34,7 @@ Name1, Name2, Required, Checkbox - названия группы полей ко
 
 Сетку полей Settings ограничивать селектором `.settings-form`: общий класс `.field-control` также используется формой задачи и не должен получать двухколоночную раскладку настроек.
 
-Регрессионный браузерный тест: `node tests/settings_required.js` (Playwright и Python3 с Jinja2). Проверяет шесть вариантов полей на ширинах 320–1440px, расположение звёздочек вне полей и сохранение required-валидации. Дополнительно проверяет изоляцию формы создания/редактирования задачи: поля сохраняют полную ширину, подписи находятся сверху, ошибки снизу, видимость статуса не переопределяется стилями Settings.
+Регрессии интерфейса — `tests/settings_required.js`.
 
 ### Алгоритм работы
 
@@ -151,44 +151,18 @@ Password-поля маскируются только визуально: сох
 
 Ошибки серверной валидации стандартных настроек отображаются в Toast; обязательность и ограничения чисел дополнительно проверяются средствами браузера. Отдельных ошибок под каждым полем Settings нет.
 
+### Период тишины ACP
 
-### Проверка ACP wait background tasks — 2026-10-21
+`agent.acp_background_quiet_timeout` включается в согласованный снимок `CONFIG_KEYS` при захвате задачи. Настройка используется AIR backend Claude/Codex и не меняет Qwen conditional close. Период тишины начинается после успешного хода и обработки учтённой фоновой работы; новые задачи и сообщения модели или инструментов сбрасывают отсчёт. Общий `agent_timeout` не продлевается. При выключенном ожидании фоновой работы настройка не влияет на выполнение.
 
-`tests/agent_background_ui.js` проверяет реальный Save и reload true/false на изолированных настройках, default off при отсутствующем ключе и отсутствие переполнения на 1357/375/320px. Desktop/mobile снимки визуально сверены с settings_proto.png и текущими текстовыми требованиями. `tests/settings_required.js` дополнительно прошёл без регрессий геометрии полей и обязательных звёздочек. Рабочие настройки не менялись.
+Поддержка определяется возможностями ACP без отдельного поля типа агента. Полный контракт — [agent.md](agent.md#опциональное-ожидание-фоновой-работы-acp). Регрессии настроек — `tests/test_settings_regressions.py`, `tests/agent_background_ui.js`.
 
+### Провайдеры моделей
 
-### Настройка периода тишины ACP — 2026-10-21
+Настройки провайдера и авторизация нативного CLI находятся на удалённой машине. Оркестратор выбирает команду через `agent.shell`; он не переносит автоматически авторизацию между Claude Code, Codex и Qwen.
 
-Добавлено поле acp_background_quiet_timeout сразу после checkbox ожидания, в существующей группе Agent shell. Значение включено в снимок CONFIG_KEYS при claim. Настройка используется AIR backend Claude/Codex и не меняет Qwen conditional-close. Семантика — период без новой работы после завершения фоновых задач и финального хода; новые задачи/сообщения модели/вызовы инструментов сбрасывают отсчёт, общий agent_timeout не продлевается. При выключенном checkbox настройка не влияет на выполнение.
+Вход Codex через ChatGPT отличается от авторизации API-ключом и не является конфигурацией общего API для других CLI. Claude Code ожидает совместимый Anthropic Messages endpoint (`/v1/messages`), а не OpenAI Responses. Для общего провайдера нужны поддерживаемый Messages endpoint, соответствующий ключ или токен и доступная модель.
 
-Проверки настройки: 64 passed в test_settings_regressions.py, test_agent_worker.py и test_agent_background.py с -W error. Playwright agent_background_ui.js проверяет default=60, положение после checkbox, number/min=1/step=1, ввод, integer Save/reload при обоих значениях checkbox, отказ для пустого/нулевого/отрицательного/дробного значения и серверный отказ для boolean. settings_required.js прошёл без регрессий. Форма визуально сверена с settings_proto.png и main_ui.md на 1357/375px; отсутствие переполнения дополнительно проверено на 320px. Временные снимки удалены, рабочие настройки и данные не изменялись.
+В Claude Code адрес задаётся через `ANTHROPIC_BASE_URL`, Bearer credential — через `ANTHROPIC_AUTH_TOKEN`, API key — через `ANTHROPIC_API_KEY`, модель — через `ANTHROPIC_MODEL`. Базовый URL не должен дублировать добавляемый клиентом путь `/v1/messages`. При необходимости alias-модели задаются через `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL` и `ANTHROPIC_DEFAULT_HAIKU_MODEL`.
 
-
-AIR backend реализован: при включённом checkbox quiet timeout реально применяется после успешного хода/обработки учтённой фоновой работы. Поддержка определяется initialize capabilities без отдельного поля «тип агента». При выключенном checkbox таймаут не применяется. Подробнее — нормативный раздел agent.md; исторические результаты проверки одного поля выше сохранены.
-
-Проверки подключения обработчиков: Agent settings и Board live прошли Playwright без изменений UI. Runtime-проверки Qwen/AIR и периода тишины описаны в agent.md; значение из этой формы теперь применяется AIR backend и остаётся частью общего agent_timeout.
-
-
-### Общий API для Claude и Codex: проверка VM 2026-11-14
-
-Текущий Codex на настроенной VM использует `auth_mode=chatgpt` и `codex login status` сообщает Logged in using ChatGPT. В `~/.codex/config.toml` есть только секция tui: custom model_provider/base_url не заданы; `OPENAI_API_KEY` отсутствует. Это подписочная авторизация Codex, а не конфигурация общего API для нескольких CLI.
-
-Claude Code не может перенять такую авторизацию одной настройкой: `ANTHROPIC_BASE_URL` выбирает endpoint формата Anthropic Messages (`/v1/messages`), а не OpenAI Responses. Для общего провайдера необходимы поддерживаемый Messages endpoint, соответствующая авторизация и модель, которую обслуживает этот endpoint. Источники — [форматы gateway Claude Code](https://code.claude.com/docs/en/llm-gateway-protocol), [подключение gateway](https://code.claude.com/docs/en/llm-gateway-connect), [авторизация Codex](https://learn.chatgpt.com/docs/auth).
-
-На VM оба Claude settings-файла отсутствуют и Claude auth status возвращает loggedIn=false/authMethod=none. Совместимый с обоими CLI API из конфигурации Codex не обнаружен, поэтому удалённые настройки не изменялись и OAuth-токены не копировались. Чтобы выполнить такое подключение, сначала нужен доступный Anthropic-compatible API/gateway с подходящими реквизитами. Это ограничение текущей конфигурации, а не подтверждение неработоспособности всех сторонних gateway.
-
-
-### Claude Code с текущим провайдером Qwen: проверка VM 2026-11-14
-
-Текущий Qwen использует `http://192.168.1.250:8080/v1`, модель `qwen3.8-flash-next-unsloth-ud-q4_k_xl` и credential из существующего `STRATA_API_KEY` в настройках Qwen. Этот же сервис фактически поддерживает Anthropic Messages: GET `/v1/models` и POST `/v1/messages` вернули HTTP 200, сообщение assistant/end_turn содержит API_OK.
-
-Временная конфигурация Claude Code использует `ANTHROPIC_BASE_URL=http://192.168.1.250:8080` (без `/v1`), `ANTHROPIC_AUTH_TOKEN` с тем же ключом провайдера, `ANTHROPIC_MODEL` с указанным ID Qwen. DEFAULT_SONNET/OPUS/HAIKU_MODEL также направлены на этот ID. Соответствие Bearer/header и способы задания env описаны в [официальном руководстве gateway](https://code.claude.com/docs/en/llm-gateway-connect).
-
-Реальный Claude Code 2.1.306 с такой временной конфигурацией завершился exit=0/subtype=success, создал result.txt с точным ожидаемым содержимым и вернул CLAUDE_LOCAL_API_OK. Отдельный запуск с stream-json подтвердил настоящий tool_use Read и возврат случайного содержимого probe.txt, отсутствовавшего в промпте. Следовательно, для проверенного сервиса работают как запрос модели, так и инструментальный цикл Claude Code.
-
-Проверка использует клиент Claude Code с моделью Qwen; она не превращает локальную модель в модель Anthropic Claude. Официально Anthropic не поддерживает маршрутизацию клиента к не-Claude моделям ([оговорка gateway](https://code.claude.com/docs/en/llm-gateway)); результаты выше фиксируют фактическую совместимость текущих версий, а не гарантию всех возможностей. Полный ACP/Clear context цикл в этом probe не повторялся.
-
-Постоянные настройки не менялись: CLAUDE_CONFIG_DIR и settings-файл с mode 0600 находились только в отдельных временных каталогах, нативное сохранение сессии отключено. Ключ извлекался на VM и не выводился/не передавался в argv. После обоих запусков собственных процессов не осталось; временные конфиги, файлы и каталоги удалены. Контрольные суммы постоянных settings совпали до/после.
-
-
-Полный ACP/Clear context с этим временным подключением выполнен отдельно: повторный четырёхфазный сценарий прошёл, включая забывание старого токена и resume новой сессии. Первая попытка зафиксировала неповторившийся отказ session/new до сохранения ID; причина не установлена. Обе попытки — [результаты](claude-qwen-context-live-results.json), описание — [agent-integration-tests.md](agent-integration-tests.md#полный-clear-context-claude-code-через-api-qwen--2026-11-14). Постоянная настройка Claude этим тестом не устанавливается.
+Модель определяется конфигурацией провайдера: использование клиента Claude Code с другим backend не меняет обслуживаемую модель. Совместимость зависит от поддерживаемого API и возможностей backend. Руководства: [gateway Claude Code](https://code.claude.com/docs/en/llm-gateway-connect), [форматы API](https://code.claude.com/docs/en/llm-gateway-protocol), [авторизация Codex](https://learn.chatgpt.com/docs/auth).
