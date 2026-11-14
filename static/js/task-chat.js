@@ -248,11 +248,12 @@
 
   window.taskChat = {
     open(task, onStatus, onSent) {
+      const comment = task && current?.id === task.task_id ? input.value : "";
       close();
       setup();
       if (!task || !panel) return;
       current = { id: task.task_id, status: task.status, onStatus, onSent };
-      input.value = "";
+      input.value = comment;
       resizeComment();
       panel.querySelector("#chat-error").textContent = "";
       messages.replaceChildren();
