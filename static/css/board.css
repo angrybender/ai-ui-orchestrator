@@ -8,6 +8,8 @@
 .task-form > * { min-width:0; }
 .task-chat[hidden], .chat-composer[hidden] { display:none; }
 .task-chat { contain:size; min-width:0; min-height:420px; max-height:max(420px, calc(100dvh - 150px)); border:1px solid #aaa; padding:16px; display:flex; flex-direction:column; gap:14px; }
+.chat-actions { flex-shrink:0; padding-top:6px; }
+.chat-actions #export-chat { margin-right:auto; }
 .chat-messages { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; display:flex; flex-direction:column; gap:20px; }
 .chat-message { flex-shrink:0; max-width:90%; margin:0; padding:10px 12px; border-radius:7px; overflow-wrap:anywhere; display:flex; flex-direction:column; gap:7px; }
 .chat-message-body { line-height:1.45; }
