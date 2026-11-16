@@ -24,6 +24,7 @@
     const url = input instanceof Request ? input.url : String(input);
     const method = String(options?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
     const key = method + " " + url;
+    const remoteStatus = method === "GET" && /\/api\/agent\/status(?:[?#]|$)/.test(url);
     const polling = method === "GET" && /\/api\/board\/tasks\/[^/?]+\/chat(?:[?#]|$)/.test(url);
     try {
       const response = await originalFetch(input, options);
@@ -52,7 +53,7 @@
       if (error.name === "AbortError") throw error;
       if (!error.status) error.message = "Unable to connect to the server. Please try again.";
       // Suppress repeated failures of background polling until recovery; actions remain visible.
-      if (!polling || failures.get(key) !== error.message) {
+      if (!remoteStatus && (!polling || failures.get(key) !== error.message)) {
         window.showToast(error.message, { type: "error", duration: 6000 });
       }
       if (polling) failures.set(key, error.message);

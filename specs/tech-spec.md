@@ -115,3 +115,7 @@ HTML-экспорт истории выполняется на клиенте о
 GET chat дополнительно возвращает `can_clear_context`; обычный `task-chat.js` без import/сборки показывает кнопку в обеих формах и использует общие Spinner/Toast. Обработчик HTTP не запускает SSH/ACP. Детальные правила — [agent.md](agent.md#ручной-сброс-acp-контекста) и [task-chat.md](task-chat.md#сброс-контекста-агента). Постоянные проверки — `tests/test_task_session.py` и `tests/task_context_ui.js`.
 
 При пропуске Init после сброса legacy-сессии `agent_remote` получает `has_session_context` из `TaskCycle.run`, поскольку worker передаёт публичную задачу отдельно от снимка захвата.
+
+### Статус удалённой подписки
+
+`controllers/remote_status.py` обслуживает GET `/api/agent/status`; отдельные `remote_limits.py` и `remote_limits_probe.py` отвечают за минутный кэш, SSH и чтение метаданных на удалённой машине. Проверка не создаёт задачи или модельные сессии. Требуется удалённый Python 3. Ресурсы SSH и собственный процесс Codex закрываются при успехе и ошибке; секреты провайдера не передаются приложению. Обычные `static/js/remote-status.js` и `static/css/remote-status.css` подключены только на Board. Подробности, таймауты и ограничения — [status-line-draft.md](status-line-draft.md).

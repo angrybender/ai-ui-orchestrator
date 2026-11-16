@@ -1,0 +1,7 @@
+.board-heading { justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+.remote-status { display:flex; flex:1 1 320px; align-items:center; gap:9px; min-width:0; color:var(--muted); font-size:12px; line-height:1.6; }
+.remote-status-dot { display:inline-block; width:11px; height:11px; flex:0 0 11px; border-radius:50%; background:#9694a2; }
+.remote-status[data-state="online"] .remote-status-dot { background:#4389e7; }
+.remote-status[data-state="offline"] .remote-status-dot { background:#f15b5b; }
+.remote-status-limits { overflow-wrap:anywhere; }
+.board-heading .board-actions { margin-left:auto; }
