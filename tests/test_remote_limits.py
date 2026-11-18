@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import io
 import json
+import os
 import time
 
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ import remote_limits_probe as helper
 @pytest.mark.parametrize('shell,expected', [
     ('/home/user/.local/bin/acp-wrapper /usr/bin/codex --yolo', ('codex', '/usr/bin/codex')),
     ('claude --acp', ('claude', 'claude')),
+    ('/home/user/.kimi-code/bin/kimi --auto acp', ('kimi', '/home/user/.kimi-code/bin/kimi')),
     ('qwen --acp', (None, None)),
     ('codex && echo nope', (None, None)),
     ('"unterminated', (None, None)),
@@ -25,8 +27,11 @@ def test_backend(shell, expected):
 def test_normalization_rejects_invalid_or_expired_metadata():
     future = time.time() + 10000
     raw = {'weekly': {'used_percent': 0, 'resets_at': future},
-           '5-hours': {'used_percent': 100, 'resets_at': future}}
+           '5-hours': {'used_percent': 100, 'resets_at': future},
+           'month-total': {'used_percent': 25, 'resets_at': future},
+           'month-code': {'used_percent': 75, 'resets_at': future}}
     assert [w['used_percent'] for w in limits.normalize(raw, 'claude')] == [0, 100]
+    assert [w['used_percent'] for w in limits.normalize(raw, 'kimi')] == [0, 100, 25, 75]
     assert len(limits.normalize(raw, 'codex')) == 1
     for used in [True, '5', -1, 101, float('nan'), float('inf'), None]:
         assert limits.normalize({'weekly': {'used_percent': used, 'resets_at': future}}, 'codex') == []
@@ -173,3 +178,41 @@ for line in sys.stdin:
 def test_claude_api_provider_has_no_subscription_limits(monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'api-secret')
     assert helper.claude_limits() == {}
+
+
+def test_kimi_reads_usage_without_model_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv('KIMI_CODE_HOME', str(tmp_path))
+    (tmp_path / 'server.token').write_text('private-token')
+    executable = tmp_path / 'kimi'
+    executable.write_text('''#!/usr/bin/env python3
+import http.server,json,os,sys
+from pathlib import Path
+assert sys.argv[1:3] == ['web','--no-open']
+port = int(sys.argv[sys.argv.index('--port')+1])
+Path(sys.argv[0]).with_name('kimi-server.pid').write_text(str(os.getpid()))
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        assert self.path == '/api/v1/oauth/usage'
+        assert self.headers['Authorization'] == 'Bearer private-token'
+        body = json.dumps({'code':0,'data':{'kind':'ok','quota':{'usages':{
+            'limit7d':{'usedRatio':.03,'resetAt':2000000000},
+            'limit5h':{'usedRatio':.25,'resetAt':2000000000},
+            'monthTotal':{'usedRatio':.0126,'resetAt':2000000000},
+            'monthCode':{'usedRatio':.126,'resetAt':2000000000}},'extraUsage':None}}}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type','application/json')
+        self.send_header('Content-Length',str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self,*args): pass
+http.server.HTTPServer(('127.0.0.1',port),Handler).serve_forever()
+''')
+    executable.chmod(0o700)
+    result = helper.kimi_limits(str(executable))
+    assert result['weekly'] == {'used_percent': 3, 'resets_at': 2000000000}
+    assert result['5-hours'] == {'used_percent': 25, 'resets_at': 2000000000}
+    assert result['month-total']['used_percent'] == pytest.approx(1.26)
+    assert result['month-code']['used_percent'] == pytest.approx(12.6)
+    assert 'private-token' not in json.dumps(result)
+    with pytest.raises(ProcessLookupError):
+        os.kill(int((tmp_path / 'kimi-server.pid').read_text()), 0)
