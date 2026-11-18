@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -65,6 +66,64 @@ def codex_limits(executable):
         process.stdout.close()
 
 
+def kimi_limits(executable):
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        port = listener.getsockname()[1]
+    process = subprocess.Popen(
+        [executable, 'web', '--no-open', '--host', '127.0.0.1', '--port', str(port)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True)
+    deadline = time.monotonic() + 15
+    token = None
+    try:
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError('Kimi server exited')
+            if token is None:
+                try:
+                    home = Path(os.environ.get('KIMI_CODE_HOME') or Path.home() / '.kimi-code')
+                    token = (home / 'server.token').read_text().strip()
+                except OSError:
+                    pass
+            if token:
+                try:
+                    request = urllib.request.Request(
+                        f'http://127.0.0.1:{port}/api/v1/oauth/usage',
+                        headers={'Authorization': 'Bearer ' + token})
+                    with urllib.request.urlopen(request, timeout=min(3, max(.01, deadline - time.monotonic()))) as response:
+                        content = response.read(65537)
+                    if len(content) > 65536:
+                        raise ValueError('Response too large')
+                    payload = json.loads(content)
+                    data = payload.get('data') or {}
+                    if payload.get('code') != 0 or data.get('kind') != 'ok':
+                        return {}
+                    usages = (data.get('quota') or {}).get('usages') or {}
+                    result = {}
+                    for source, name in [('limit7d', 'weekly'), ('limit5h', '5-hours'),
+                                         ('monthTotal', 'month-total'), ('monthCode', 'month-code')]:
+                        window = usages.get(source) or {}
+                        ratio = window.get('usedRatio')
+                        if type(ratio) in (int, float):
+                            result[name] = {'used_percent': round(ratio * 100, 10), 'resets_at': window.get('resetAt')}
+                    return result
+                except (OSError, ValueError, urllib.error.URLError):
+                    pass
+            time.sleep(.1)
+        raise TimeoutError
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=1)
+
+
 def claude_limits():
     if os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('ANTHROPIC_AUTH_TOKEN'):
         return {}
@@ -87,7 +146,12 @@ def claude_limits():
 
 if __name__ == '__main__':
     try:
-        result = codex_limits(sys.argv[2]) if sys.argv[1] == 'codex' else claude_limits()
+        if sys.argv[1] == 'codex':
+            result = codex_limits(sys.argv[2])
+        elif sys.argv[1] == 'kimi':
+            result = kimi_limits(sys.argv[2])
+        else:
+            result = claude_limits()
     except Exception:
         result = {}
     print(json.dumps(result), flush=True)

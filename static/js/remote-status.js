@@ -13,7 +13,7 @@
     dot.setAttribute('aria-label', reachable ? 'Remote SSH available' : 'Remote SSH unavailable');
     dot.title = dot.getAttribute('aria-label');
     const limits = reachable && Array.isArray(data.limits) ? data.limits : [];
-    text.textContent = limits.length ? `${data.agent === 'claude' ? 'Claude' : 'Codex'} limits remaining (reset at, UTC): ${limits.map(limit => {
+    text.textContent = limits.length ? `${data.agent === 'claude' ? 'Claude' : data.agent === 'kimi' ? 'Kimi' : 'Codex'} limits remaining (reset at, UTC): ${limits.map(limit => {
       const date = new Date(limit.resets_at);
       const remaining = Number((100 - limit.used_percent).toFixed(2));
       return `${limit.name} ${remaining}% (${Number.isNaN(date.getTime()) ? '—' : date.toISOString().slice(0, 19).replace('T', ' ')})`;

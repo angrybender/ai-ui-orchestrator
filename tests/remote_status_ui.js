@@ -68,6 +68,17 @@ const path = require('node:path');
     await page.clock.fastForward(60000);
     await expect(status).toContainText('weekly 0% (2028-11-21 08:14:35)');
     await expect(status).toContainText('5-hours 0.1% (2028-11-16 15:00:00)');
+    data = { reachable: true, agent: 'kimi', limits: [
+      { name: 'weekly', used_percent: 3, resets_at: '2028-11-21T08:14:35Z' },
+      { name: '5-hours', used_percent: 25, resets_at: '2028-11-18T20:00:00Z' },
+      { name: 'month-total', used_percent: 1.26, resets_at: '2028-12-19T00:00:00Z' },
+      { name: 'month-code', used_percent: 12.6, resets_at: '2028-12-19T00:00:00Z' }
+    ] };
+    await page.clock.fastForward(60000);
+    await expect(status).toContainText('Kimi limits remaining (reset at, UTC): weekly 97% (2028-11-21 08:14:35)');
+    await expect(status).toContainText('5-hours 75% (2028-11-18 20:00:00)');
+    await expect(status).toContainText('month-total 98.74% (2028-12-19 00:00:00)');
+    await expect(status).toContainText('month-code 87.4% (2028-12-19 00:00:00)');
     data = { reachable: true, agent: 'claude', limits: [] };
     await page.clock.fastForward(60000);
     await expect(status.locator('.remote-status-limits')).toHaveText('');
@@ -84,7 +95,7 @@ const path = require('node:path');
     await page.goto(`${info.url}/archive`);
     await expect(page.locator('#remote-status')).toHaveCount(0);
     assert.deepEqual(errors, []);
-    console.log('Remote status: remaining quotas for Codex/Claude, 0%/100%/fractional remaining, SSH states, minute refresh, absent metadata, desktop/mobile, Board-only: passed');
+    console.log('Remote status: remaining quotas for Codex/Claude/Kimi, 0%/100%/fractional remaining, SSH states, minute refresh, absent metadata, desktop/mobile, Board-only: passed');
   } finally {
     if (browser) await browser.close();
     server.stdin.end('\n');

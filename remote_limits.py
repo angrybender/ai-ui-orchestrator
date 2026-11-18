@@ -38,14 +38,18 @@ def backend(shell):
         return None, None
     executable = words[index]
     name = Path(executable).name
-    return (name, executable) if name in ('codex', 'claude') else (None, None)
+    return (name, executable) if name in ('codex', 'claude', 'kimi') else (None, None)
 
 
 def normalize(raw, agent):
     windows = []
     if not isinstance(raw, dict):
         return windows
-    for name in (('weekly', '5-hours') if agent == 'claude' else ('weekly',)):
+    names = {
+        'claude': ('weekly', '5-hours'),
+        'kimi': ('weekly', '5-hours', 'month-total', 'month-code'),
+    }.get(agent, ('weekly',))
+    for name in names:
         window = raw.get(name)
         if not isinstance(window, dict):
             continue
