@@ -9,7 +9,7 @@
   let failed = false;
   let pendingData = null;
   let initialScrollPending = false;
-  let panel, messages, composer, input, button;
+  let panel, messages, composer, input, button, clearButton, exportButton;
 
   function spinnerActive() {
     return document.querySelector("#task-form")?.dataset.spinnerActive === "true";
@@ -48,12 +48,25 @@
     panel.className = "task-chat";
     panel.setAttribute("aria-label", "Task comments");
     panel.hidden = true;
-    panel.innerHTML = '<div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div><div id="chat-composer" class="chat-composer"><label for="chat-comment">User comment</label><textarea id="chat-comment" rows="2" placeholder="user comment" maxlength="32000"></textarea><p class="field-error" id="chat-error" role="alert"></p><div class="form-actions"><button class="button" id="send-comment" type="button">Send comment</button></div></div>';
+    panel.innerHTML = '<div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"></div><div id="chat-composer" class="chat-composer"><label for="chat-comment">User comment</label><textarea id="chat-comment" rows="2" placeholder="user comment" maxlength="32000"></textarea><p class="field-error" id="chat-error" role="alert"></p><div class="form-actions"><button class="button" id="clear-context" type="button" hidden title="Start a new agent session on the next run; keep files and chat history">Clear context</button><button class="button" id="send-comment" type="button">Send comment</button></div></div>';
+    const actions = panel.querySelector(".form-actions");
+    actions.classList.add("chat-actions");
+    exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.id = "export-chat";
+    exportButton.className = "button";
+    exportButton.textContent = "Export HTML";
+    exportButton.title = "Download the task conversation as an HTML file";
+    exportButton.addEventListener("click", exportChat);
+    actions.prepend(exportButton);
+    panel.append(actions);
     form.append(panel);
     messages = panel.querySelector("#chat-messages");
     composer = panel.querySelector("#chat-composer");
     input = panel.querySelector("#chat-comment");
     button = panel.querySelector("#send-comment");
+    clearButton = panel.querySelector("#clear-context");
+    clearButton.addEventListener("click", clearContext);
     input.addEventListener("input", resizeComment);
     let previousWidth = 0;
     new ResizeObserver(() => {
@@ -72,6 +85,8 @@
       return;
     }
     current.status = data.status;
+    current.messages = data.messages;
+    exportButton.disabled = !data.messages.length;
     const content = JSON.stringify(data.messages);
     const agentContent = JSON.stringify(data.messages.filter(message => message.role === "agent"));
     const agentUpdated = lastAgentContent !== null && agentContent !== lastAgentContent && data.messages.some(message => message.role === "agent");
@@ -121,6 +136,8 @@
       messages.scrollTop = scrollTop;
     }
     composer.hidden = !["BACKLOG", "REVIEW", "WAIT"].includes(data.status);
+    button.hidden = composer.hidden;
+    clearButton.hidden = composer.hidden || data.can_clear_context !== true;
     panel.hidden = !data.messages.length && composer.hidden;
     document.querySelector(".task-dialog").classList.toggle("has-chat", !panel.hidden);
     document.querySelector(".task-page-editor")?.classList.toggle("has-chat", !panel.hidden);
@@ -207,6 +224,40 @@
     }
   }
 
+  async function clearContext() {
+    if (!current || clearButton.hidden || clearButton.disabled || spinnerActive()) return;
+    if (window.spinner && !window.spinner.start(clearButton)) return;
+    const label = clearButton.querySelector(".spinner + span");
+    if (label) label.textContent = "Clearing…";
+    clearTimeout(timer);
+    controller?.abort();
+    pendingData = null;
+    const token = ++generation;
+    try {
+      const response = await fetch(`/api/board/tasks/${encodeURIComponent(current.id)}/clear-context`, { method: "POST" });
+      const data = await readResponse(response);
+      if (data && token === generation) {
+        render(data);
+        window.showToast("Context cleared. The next run will start a new session.");
+      }
+    } catch (error) {
+      if (!error.reported) window.showToast("Unable to clear agent context", { type: "error" });
+    } finally {
+      if (window.spinner) window.spinner.stop(clearButton);
+      applyPending();
+      if (current && token === generation) poll(token);
+    }
+  }
+
+  function exportChat() {
+    if (!current || exportButton.disabled || spinnerActive() || !current.messages.length) return;
+    try {
+      window.taskChatExport.download(current);
+    } catch (error) {
+      window.showToast("Unable to export chat", { type: "error" });
+    }
+  }
+
   function close() {
     generation++;
     clearTimeout(timer);
@@ -220,11 +271,12 @@
 
   window.taskChat = {
     open(task, onStatus, onSent) {
+      const comment = task && current?.id === task.task_id ? input.value : "";
       close();
       setup();
       if (!task || !panel) return;
-      current = { id: task.task_id, status: task.status, onStatus, onSent };
-      input.value = "";
+      current = { id: task.task_id, title: task.title, status: task.status, messages: [], onStatus, onSent };
+      input.value = comment;
       resizeComment();
       panel.querySelector("#chat-error").textContent = "";
       messages.replaceChildren();

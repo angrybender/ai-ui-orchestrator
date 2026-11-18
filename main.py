@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from controllers.remote_status import router as remote_status_router
 from controllers.board import router as board_router
 from controllers.archive import router as archive_router
 from controllers.settings import router as settings_router
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI UI Orchestrator", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(board_router)
+app.include_router(remote_status_router)
 app.include_router(archive_router)
 app.include_router(settings_router)
 app.include_router(agent_router)

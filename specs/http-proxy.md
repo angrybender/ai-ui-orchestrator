@@ -1,13 +1,13 @@
 ## HTTP proxy
 
-### Реализация и регрессионные проверки
+### Реализация
 
 - Конфигурация и GET-проверки: `settings/http_proxy.py`; явная интеграция кастомной секции: `settings/settings.py`.
 - Потоковый транспорт и независимые listeners: `http_proxy.py`; lifecycle: `main.py`; передача фактических host/port: `start.py`.
 - Кастомная форма: `templates/http_proxy.html`, `static/js/http-proxy.js`, `static/css/http-proxy.css`. Сборка JS и модули `import` не требуются.
-- Python-регрессии: `tests/test_http_proxy.py`, `tests/test_http_proxy_settings.py`, `tests/test_http_proxy_api.py`, `tests/test_http_proxy_tls.py`. Проверяются исходный URI, методы и тела, заголовки, gzip, cookie isolation, фильтры, 502/504, SSE, отключение клиента, TLS с самоподписанным сертификатом и несовпадающим именем, сохранение и lifecycle.
-- Горячее применение: `tests/test_http_proxy_live.py` проверяет успешный Save с реальными HTTP-запросами и открытым SSE, неизменность listeners/пула/отложенных параметров, ошибки Save, сопоставление по порту и параллельные сохранения.
-- Браузерные регрессии: `node tests/http_proxy_ui.js` с окружением Playwright; проверяются элементы управления, сохранённые значения, пустой список, spinner, Toast для горячего применения и отложенных изменений, отсутствие горизонтального переполнения на 320–1440px. `HTTP_PROXY_SCREENSHOT` задаёт необязательный путь временного снимка для визуальной сверки; после проверки снимок удаляется.
+- Проверки — `tests/test_http_proxy.py`, `tests/test_http_proxy_settings.py`, `tests/test_http_proxy_api.py`, `tests/test_http_proxy_tls.py`.
+- Проверки горячего применения — `tests/test_http_proxy_live.py`.
+- Проверки интерфейса — `tests/http_proxy_ui.js`.
 
 ### Контекст и жизненный цикл
 

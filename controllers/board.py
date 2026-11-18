@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 import board_store
+import task_session
 from board_events import task_events
 from agent_remote import RemoteAgentError
 
@@ -93,6 +94,14 @@ def add_chat(task_id: str, payload: ChatPayload):
         return board_store.add_user_comment(task_id, payload.comment)
     except board_store.BoardError as error:
         raise _error(error) from error
+
+@router.post("/api/board/tasks/{task_id}/clear-context")
+def clear_task_context(task_id: str):
+    try:
+        return task_session.clear_context(task_id)
+    except board_store.BoardError as error:
+        raise _error(error) from error
+
 
 @router.get("/api/board/tasks/{task_id}")
 def task(task_id: str):
